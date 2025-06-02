@@ -30,7 +30,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
-o problema continua: import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 
