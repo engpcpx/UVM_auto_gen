@@ -1,3 +1,4 @@
+# VEGA - Verification Environment Generator Assembler
 # UVM Testbench Generator Templates
 
 # UVM Auto Generator 🚀
@@ -7,7 +8,7 @@
 
 ## 📌 Overview
 
-The **UVM Auto Generator** is a Python-based tool that automatically creates complete UVM (Universal Verification Methodology) testbenches from RTL module definitions. It significantly reduces verification setup time from days to minutes.
+The **VEGA** is a Python-based tool that automatically creates complete UVM (Universal Verification Methodology) testbenches from RTL module definitions. It significantly reduces verification setup time from days to minutes.
 
 ## ✨ Key Features
 
