@@ -1,0 +1,41 @@
+// Sequências base para {{ module.name }}
+// Gerado automaticamente em {{ timestamp }}
+
+class {{ module.name }}_basic_sequence extends uvm_sequence #({{ module.name }}_transaction);
+    
+    `uvm_object_utils({{ module.name }}_basic_sequence)
+    
+    // Constructor
+    function new(string name = "{{ module.name }}_basic_sequence");
+        super.new(name);
+    endfunction
+    
+    // Body task
+    virtual task body();
+        {{ module.name }}_transaction tx;
+        
+        repeat(10) begin
+            tx = {{ module.name }}_transaction::type_id::create("tx");
+            start_item(tx);
+            if(!tx.randomize())
+                `uvm_error("SEQ", "Randomization failed")
+            finish_item(tx);
+        end
+    endtask
+
+endclass
+
+class {{ module.name }}_random_sequence extends {{ module.name }}_basic_sequence;
+    
+    `uvm_object_utils({{ module.name }}_random_sequence)
+    
+    // Constraints adicionais
+    constraint extended_ranges {
+        // Exemplo: expande faixas de valores aleatórios
+    }
+    
+    function new(string name = "{{ module.name }}_random_sequence");
+        super.new(name);
+    endfunction
+
+endclass

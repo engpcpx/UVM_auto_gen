@@ -1,0 +1,15 @@
+# Script de compilação para {{ module.name }}
+# Gerado automaticamente em {{ timestamp }}
+
+vlib work
+vlog -sv -timescale "1ns/1ps" \
+    {{ module.name }}_if.sv \
+    {{ module.name }}_transaction.sv \
+    {% if config.include_scoreboard %}{{ module.name }}_scoreboard.sv \{% endif %}
+    {% if config.include_coverage %}{{ module.name }}_coverage.sv \{% endif %}
+    {{ module.name }}_driver.sv \
+    {{ module.name }}_monitor.sv \
+    {{ module.name }}_agent.sv \
+    {{ module.name }}_env.sv \
+    {{ module.name }}_test.sv \
+    top_tb.sv

@@ -1,0 +1,31 @@
+class {{ module.name }}_driver extends uvm_driver #({{ module.name }}_transaction);
+    `uvm_component_utils({{ module.name }}_driver)
+    
+    virtual {{ module.name }}_interface vif;
+    
+    function new(string name, uvm_component parent);
+        super.new(name, parent);
+    endfunction
+    
+    function void build_phase(uvm_phase phase);
+        super.build_phase(phase);
+        if (!uvm_config_db#(virtual {{ module.name }}_interface)::get(this, "", "vif", vif))
+            `uvm_fatal("NOVIF", "Virtual interface not found")
+    endfunction
+    
+    task run_phase(uvm_phase phase);
+        forever begin
+            {{ module.name }}_transaction tr;
+            seq_item_port.get_next_item(tr);
+            drive_transaction(tr);
+            seq_item_port.item_done();
+        end
+    endtask
+    
+    task drive_transaction({{ module.name }}_transaction tr);
+        @(vif.driver_cb);
+        {% for port in module.ports if port.direction == 'input' %}
+        vif.driver_cb.{{ port.name }} <= tr.{{ port.name }};
+        {% endfor %}
+    endtask
+endclass

@@ -1,0 +1,8 @@
+# Script de simulação para {{ module.name }}
+# Gerado automaticamente em {{ timestamp }}
+
+vsim -voptargs=+acc work.top_tb
+add wave -position insertpoint sim:/top_tb/dut/*
+add wave -position insertpoint sim:/top_tb/tb_if/*
+run -all
+wave zoom full

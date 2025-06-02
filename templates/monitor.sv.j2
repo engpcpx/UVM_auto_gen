@@ -1,0 +1,33 @@
+class {{ module.name }}_monitor extends uvm_monitor;
+    `uvm_component_utils({{ module.name }}_monitor)
+    
+    virtual {{ module.name }}_interface vif;
+    uvm_analysis_port #({{ module.name }}_transaction) mon_ap;
+    
+    function new(string name, uvm_component parent);
+        super.new(name, parent);
+        mon_ap = new("mon_ap", this);
+    endfunction
+    
+    function void build_phase(uvm_phase phase);
+        super.build_phase(phase);
+        if (!uvm_config_db#(virtual {{ module.name }}_interface)::get(this, "", "vif", vif))
+            `uvm_fatal("NOVIF", "Virtual interface not found")
+    endfunction
+    
+    task run_phase(uvm_phase phase);
+        forever begin
+            {{ module.name }}_transaction tr;
+            @(vif.monitor_cb);
+            sample_transaction(tr);
+            mon_ap.write(tr);
+        end
+    endtask
+    
+    task sample_transaction(output {{ module.name }}_transaction tr);
+        tr = {{ module.name }}_transaction::type_id::create("tr");
+        {% for port in module.ports %}
+        tr.{{ port.name }} = vif.monitor_cb.{{ port.name }};
+        {% endfor %}
+    endtask
+endclass

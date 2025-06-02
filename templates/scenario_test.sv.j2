@@ -1,0 +1,19 @@
+// Auto-generated {{ scenario }} test for {{ module.name }}
+class {{ module.name }}_{{ scenario }}_test extends {{ module.name }}_base_test;
+    
+    `uvm_component_utils({{ module.name }}_{{ scenario }}_test)
+    
+    function new(string name = "{{ module.name }}_{{ scenario }}_test", uvm_component parent = null);
+        super.new(name, parent);
+    endfunction
+    
+    virtual task run_phase(uvm_phase phase);
+        {{ module.name }}_{{ scenario }}_sequence seq;
+        
+        phase.raise_objection(this);
+        seq = {{ module.name }}_{{ scenario }}_sequence::type_id::create("seq");
+        seq.start(env.agent.sequencer);
+        phase.drop_objection(this);
+    endtask
+
+endclass

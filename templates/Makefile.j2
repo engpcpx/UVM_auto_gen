@@ -1,0 +1,37 @@
+# UVM Testbench Makefile
+# Generated: {{ timestamp }}
+
+PROJECT = {{ module.name }}_tb
+UVM_HOME ?= $(shell printenv UVM_HOME)
+VLOG_OPT = -sv +incdir+$(UVM_HOME)/src
+VSIM_OPT = -voptargs="+acc -O3"
+
+.PHONY: all compile run clean
+
+all: compile run
+
+compile:
+	vlib work
+	vmap work work
+	vlog $(VLOG_OPT) $(UVM_HOME)/src/uvm_pkg.sv
+	vlog $(VLOG_OPT) ../rtl/{{ module.name }}.sv
+	{% for file in generated_files if file.endswith('.sv') %}
+	vlog $(VLOG_OPT) {{ file }}
+	{% endfor %}
+	vlog $(VLOG_OPT) top_tb.sv
+
+run:
+	vsim $(VSIM_OPT) -do "add wave *; run -all; quit" work.top_tb
+
+regression:
+	@for i in `seq 1 {{ config.num_tests }}`; do \
+		echo "Running test $$i"; \
+		vsim $(VSIM_OPT) -c -do "run -all; quit" work.top_tb +UVM_SEED=$$RANDOM; \
+	done
+
+coverage:
+	vsim $(VSIM_OPT) -coverage -do "run -all; coverage save -onexit $$(PROJECT).ucdb; quit" work.top_tb
+	vcover report -details $$(PROJECT).ucdb
+
+clean:
+	rm -rf work transcript *.wlf *.ucdb *.log *.vstf

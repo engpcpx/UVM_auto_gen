@@ -1,0 +1,35 @@
+# Simulation Run Script
+# Generated: {{ timestamp }}
+
+# Load simulation
+vsim -voptargs="$OPTIMIZE" work.top_tb
+
+# Add waves
+add wave -position insertpoint sim:/top_tb/dut/*
+add wave -position insertpoint sim:/top_tb/tb_if/*
+
+# UVM verbosity
+set UVM_VERBOSITY "UVM_MEDIUM"
+
+# Run with different seeds
+for {set i 1} {$i <= {{ config.num_tests }}} {incr i} {
+    restart -f
+    set SEED [expr {$i * 100}]
+    setenv UVM_SEED $SEED
+    echo "\nRunning test #$i with seed $SEED"
+    
+    run -all
+    
+    # Check for UVM_FATAL
+    if {[catch {examine -radix decimal sim:/top_tb/uvm_test_top/uvm_fatal_count}] == 0} {
+        set fatal_count [examine -radix decimal sim:/top_tb/uvm_test_top/uvm_fatal_count]
+        if {$fatal_count > 0} {
+            echo "UVM_FATAL encountered! Stopping simulation."
+            break
+        }
+    }
+}
+
+# Final reports
+coverage report -detail -file coverage_report.txt
+echo "\nSimulation completed at [clock format [clock seconds]]"

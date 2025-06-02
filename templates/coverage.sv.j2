@@ -1,0 +1,39 @@
+class {{ module.name }}_coverage extends uvm_subscriber #({{ module.name }}_transaction);
+    `uvm_component_utils({{ module.name }}_coverage)
+    
+    // Coverage groups
+    covergroup {{ module.name }}_cg;
+        {% for port in module.ports if port.direction == 'input' %}
+        {{ port.name }}_cp: coverpoint tr.{{ port.name }} {
+            bins {{ port.name }}_vals[] = {[0:2**$size(tr.{{ port.name }})-1]};
+        }
+        {% endfor %}
+        
+        // Cross coverage
+        {% for i in range(module.ports|length) %}
+        {% if module.ports[i].direction == 'input' %}
+        {% for j in range(i+1, module.ports|length) %}
+        {% if module.ports[j].direction == 'input' %}
+        {{ module.ports[i].name }}_{{ module.ports[j].name }}_cross: 
+            cross {{ module.ports[i].name }}_cp, {{ module.ports[j].name }}_cp;
+        {% endif %}
+        {% endfor %}
+        {% endif %}
+        {% endfor %}
+    endgroup
+    
+    function new(string name, uvm_component parent);
+        super.new(name, parent);
+        {{ module.name }}_cg = new();
+    endfunction
+    
+    function void write({{ module.name }}_transaction t);
+        {{ module.name }}_cg.sample();
+    endfunction
+    
+    function void report_phase(uvm_phase phase);
+        super.report_phase(phase);
+        `uvm_info("COVERAGE", $sformatf("Functional coverage: %0.2f%%", 
+                   {{ module.name }}_cg.get_inst_coverage()), UVM_MEDIUM)
+    endfunction
+endclass

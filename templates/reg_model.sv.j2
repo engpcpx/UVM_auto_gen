@@ -1,0 +1,28 @@
+// Modelo de registradores para {{ module.name }}
+// Gerado automaticamente em {{ timestamp }}
+
+class {{ module.name }}_reg_block extends uvm_reg_block;
+    
+    `uvm_object_utils({{ module.name }}_reg_block)
+    
+    // Registradores
+    // Adicione seus registradores aqui
+    
+    // Constructor
+    function new(string name = "{{ module.name }}_reg_block");
+        super.new(name);
+    endfunction
+    
+    // Build
+    virtual function void build();
+        // Configure o mapa de endereços e crie registradores
+        default_map = create_map("default_map", 'h0, 4, UVM_LITTLE_ENDIAN);
+        
+        // Exemplo:
+        // some_reg = some_reg_type::type_id::create("some_reg");
+        // some_reg.configure(this);
+        // some_reg.build();
+        // default_map.add_reg(some_reg, 'h00);
+    endfunction
+
+endclass

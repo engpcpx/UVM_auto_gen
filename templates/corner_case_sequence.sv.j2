@@ -1,0 +1,64 @@
+// Sequência de corner cases para {{ module.name }}
+// Gerado automaticamente em {{ timestamp }}
+
+class {{ module.name }}_corner_case_sequence extends {{ module.name }}_basic_sequence;
+    
+    `uvm_object_utils({{ module.name }}_corner_case_sequence)
+    
+    // Constructor
+    function new(string name = "{{ module.name }}_corner_case_sequence");
+        super.new(name);
+        sequence_length = 8; // Número típico de corner cases
+    endfunction
+    
+    // Corpo da sequência com casos específicos
+    virtual task body();
+        {{ module.name }}_transaction tr;
+        
+        // Caso 1: Todos os sinais em 0
+        tr = create_and_randomize_transaction(0);
+        `uvm_info("CORNER", "All zeros case", UVM_HIGH)
+        
+        // Caso 2: Todos os sinais em 1
+        tr = create_and_randomize_transaction(1);
+        `uvm_info("CORNER", "All ones case", UVM_HIGH)
+        
+        // Adicione outros corner cases específicos do seu DUT aqui
+        {% for port in module.ports %}
+        {% if port.direction == 'input' %}
+        // Caso para {{ port.name }} extremos
+        tr = create_transaction();
+        tr.{{ port.name }} = 'h0;
+        send_transaction(tr, $sformatf("Min value for {{ port.name }}"));
+        
+        tr = create_transaction();
+        tr.{{ port.name }} = 'hFFFFFFFF;
+        send_transaction(tr, $sformatf("Max value for {{ port.name }}"));
+        {% endif %}
+        {% endfor %}
+    endtask
+    
+    // Métodos auxiliares
+    local function {{ module.name }}_transaction create_and_randomize_transaction(bit all_values);
+        {{ module.name }}_transaction tr = {{ module.name }}_transaction::type_id::create("tr");
+        start_item(tr);
+        if(!tr.randomize() with {
+            {% for port in module.ports %}
+            {% if port.direction == 'input' %}
+            {{ port.name }} == {'{all_values}};
+            {% endif %}
+            {% endfor %}
+        }) begin
+            `uvm_error("CORNER", "Corner case randomization failed")
+        end
+        finish_item(tr);
+        return tr;
+    endfunction
+    
+    local task send_transaction({{ module.name }}_transaction tr, string description);
+        start_item(tr);
+        finish_item(tr);
+        `uvm_info("CORNER", description, UVM_HIGH)
+    endtask
+
+endclass

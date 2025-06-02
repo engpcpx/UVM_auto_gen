@@ -1,0 +1,31 @@
+class {{ module.name }}_transaction extends uvm_sequence_item;
+    `uvm_object_utils({{ module.name }}_transaction)
+    
+    // Transaction fields
+    {% for port in module.ports if port.direction == 'input' %}
+    rand logic {{ port.width }} {{ port.name }};
+    {% endfor %}
+    
+    {% for port in module.ports if port.direction == 'output' %}
+    logic {{ port.width }} {{ port.name }};
+    {% endfor %}
+    
+    // Constraints
+    constraint reasonable_values {
+        {% for port in module.ports if port.direction == 'input' and port.width == '1' %}
+        {{ port.name }} inside {0, 1};
+        {% endfor %}
+        
+        {% for port in module.ports if port.direction == 'input' and port.width != '1' %}
+        // TODO: Add constraints for {{ port.name }}
+        {% endfor %}
+    }
+    
+    function new(string name = "{{ module.name }}_transaction");
+        super.new(name);
+    endfunction
+    
+    function string convert2string();
+        return $sformatf({% for port in module.ports %}"{{ port.name }}=%0d "{% endfor %}{% for port in module.ports %}, {{ port.name }}{% endfor %});
+    endfunction
+endclass

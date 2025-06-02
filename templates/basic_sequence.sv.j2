@@ -1,0 +1,36 @@
+// Sequência básica para {{ module.name }}
+// Gerado automaticamente em {{ timestamp }}
+
+class {{ module.name }}_basic_sequence extends uvm_sequence #({{ module.name }}_transaction);
+    
+    `uvm_object_utils({{ module.name }}_basic_sequence)
+    
+    // Parâmetros de configuração
+    int unsigned sequence_length = 10;
+    
+    // Constructor
+    function new(string name = "{{ module.name }}_basic_sequence");
+        super.new(name);
+    endfunction
+    
+    // Corpo da sequência
+    virtual task body();
+        {{ module.name }}_transaction tr;
+        
+        repeat(sequence_length) begin
+            tr = {{ module.name }}_transaction::type_id::create("tr");
+            start_item(tr);
+            
+            if(!tr.randomize() with {
+                // Constraints básicas podem ser adicionadas aqui
+            }) begin
+                `uvm_error("SEQ", "Randomization failed")
+            end
+            
+            finish_item(tr);
+            
+            `uvm_info("SEQ", $sformatf("Transaction sent: %s", tr.convert2string()), UVM_MEDIUM)
+        end
+    endtask
+
+endclass

@@ -1,0 +1,29 @@
+// Auto-generated {{ scenario }} sequence for {{ module.name }}
+class {{ module.name }}_{{ scenario }}_sequence extends uvm_sequence #({{ module.name }}_transaction);
+    
+    `uvm_object_utils({{ module.name }}_{{ scenario }}_sequence)
+    
+    // Weight configuration: {{ weight }}
+    rand int unsigned sequence_length;
+    
+    constraint length_constraint {
+        sequence_length inside {[{{ weight }}:{{ weight + 10 }}]};
+    }
+    
+    function new(string name = "{{ module.name }}_{{ scenario }}_sequence");
+        super.new(name);
+    endfunction
+    
+    virtual task body();
+        {{ module.name }}_transaction tr;
+        repeat(sequence_length) begin
+            tr = {{ module.name }}_transaction::type_id::create("tr");
+            start_item(tr);
+            if (!tr.randomize()) begin
+                `uvm_error("SEQ", "Randomization failed")
+            end
+            finish_item(tr);
+        end
+    endtask
+
+endclass

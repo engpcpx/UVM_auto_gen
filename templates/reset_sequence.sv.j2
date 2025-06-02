@@ -1,0 +1,73 @@
+// Sequência de reset para {{ module.name }}
+// Gerado automaticamente em {{ timestamp }}
+
+class {{ module.name }}_reset_sequence extends uvm_sequence #({{ module.name }}_transaction);
+    
+    `uvm_object_utils({{ module.name }}_reset_sequence)
+    
+    // Parâmetros de configuração
+    int unsigned reset_cycles = 5;
+    
+    // Constructor
+    function new(string name = "{{ module.name }}_reset_sequence");
+        super.new(name);
+    endfunction
+    
+    // Corpo da sequência
+    virtual task body();
+        {{ module.name }}_transaction tr;
+        
+        tr = {{ module.name }}_transaction::type_id::create("tr");
+        
+        // Aplicar reset
+        start_item(tr);
+        assert(tr.randomize() with {
+            {% if config.reset_active_low %}
+            // Reset active low
+            {% for port in module.ports %}
+            {% if port.name in module.reset_signals %}
+            {{ port.name }} == 0;
+            {% endif %}
+            {% endfor %}
+            {% else %}
+            // Reset active high
+            {% for port in module.ports %}
+            {% if port.name in module.reset_signals %}
+            {{ port.name }} == 1;
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+        });
+        finish_item(tr);
+        
+        // Manter reset por N ciclos
+        repeat(reset_cycles-1) begin
+            start_item(tr);
+            finish_item(tr);
+        end
+        
+        // Liberar reset
+        start_item(tr);
+        assert(tr.randomize() with {
+            {% if config.reset_active_low %}
+            // Liberar reset (active low)
+            {% for port in module.ports %}
+            {% if port.name in module.reset_signals %}
+            {{ port.name }} == 1;
+            {% endif %}
+            {% endfor %}
+            {% else %}
+            // Liberar reset (active high)
+            {% for port in module.ports %}
+            {% if port.name in module.reset_signals %}
+            {{ port.name }} == 0;
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+        });
+        finish_item(tr);
+        
+        `uvm_info("RST_SEQ", "Reset sequence completed", UVM_MEDIUM)
+    endtask
+
+endclass

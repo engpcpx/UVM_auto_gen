@@ -1,0 +1,20 @@
+interface {{ module.name }}_interface;
+    // Module signals
+    {% for port in module.ports %}
+    logic {{ port.width }} {{ port.name }};
+    {% endfor %}
+    
+    // Clocking blocks
+    clocking driver_cb @(posedge {% for port in module.ports if 'clk' in port.name %}{{ port.name }}{% endfor %});
+        default input #1 output #1;
+        {% for port in module.ports if port.direction == 'input' %}
+        output {{ port.name }};
+        {% endfor %}
+        {% for port in module.ports if port.direction == 'output' %}
+        input {{ port.name }};
+        {% endfor %}
+    endclocking
+    
+    modport DRIVER (clocking driver_cb);
+    modport MONITOR (input {% for port in module.ports %}{{ port.name }}{% if not loop.last %}, {% endif %}{% endfor %});
+endinterface

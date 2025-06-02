@@ -1,0 +1,21 @@
+// Configuração do ambiente {{ module.name }}
+// Gerado automaticamente em {{ timestamp }}
+
+class {{ module.name }}_config extends uvm_object;
+    
+    `uvm_object_utils({{ module.name }}_config)
+    
+    // Interface virtual
+    virtual {{ module.name }}_if vif;
+    
+    // Parâmetros de configuração
+    bit has_coverage = {{ 1 if config.include_coverage else 0 }};
+    bit has_scoreboard = {{ 1 if config.include_scoreboard else 0 }};
+    uvm_active_passive_enum agent_active = UVM_ACTIVE;
+    
+    // Constructor
+    function new(string name = "{{ module.name }}_config");
+        super.new(name);
+    endfunction
+
+endclass
