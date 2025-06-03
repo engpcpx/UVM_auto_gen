@@ -359,49 +359,50 @@ class UVMAutoGenerator:
         
         self.root.config(menu=menubar)
     
+
+
+
     def toggle_theme(self):
         """Toggles between dark and light theme"""
         if self.dark_mode.get():
             # Dark theme colors (Professional dark theme with better contrast)
-            bg_color = "#1e1e1e"      # Fundo principal
-            fg_color = "#d4d4d4"      # Texto principal (mais claro para melhor contraste) - Alterado de #707070 para #d4d4d4
-            entry_bg = "#2d2d2d"      # Fundo de campos de entrada
-            text_bg = "#252526"       # Fundo de áreas de texto
-            text_fg = "#f0f0f0"       # Texto em áreas de texto
+            bg_color = "#1e1e1e"  # Fundo principal
+            fg_color = "#707070"  # Texto principal (mais claro para melhor contraste)
+            entry_bg = "#2d2d2d"  # Fundo de campos de entrada
+            text_bg = "#252526"    # Fundo de áreas de texto
+            text_fg = "#f0f0f0"    # Texto em áreas de texto
             highlight_bg = "#333333"  # Destaques
             highlight_fg = "#ffffff"  # Texto em destaques
-            tab_bg = "#2d2d2d"       # Fundo das abas
-            tab_fg = "#d4d4d4"       # Texto das abas
-            select_bg = "#264f78"    # Cor de seleção (azul mais suave)
-            select_fg = "#ffffff"    # Texto selecionado
-            button_bg = "#3a6ea5"    # Botões principais (alterado de #333333 para azul)
-            button_fg = "#ffffff"    # Texto em botões
-            border_color = "#454545" # Bordas
-            active_bg = "#37373d"    # Elementos ativos
-            active_fg = "#ffffff"    # Texto em elementos ativos
-            accent_color = "#3a6ea5" # Cor de destaque para elementos importantes (alterado para azul)
+            tab_bg = "#2d2d2d"     # Fundo das abas
+            tab_fg = "#d4d4d4"     # Texto das abas
+            select_bg = "#264f78"  # Cor de seleção (azul mais suave)
+            select_fg = "#ffffff"   # Texto selecionado
+            button_bg = "#333333"   # Botões principais
+            button_fg = "#ffffff"   # Texto em botões
+            border_color = "#454545"  # Bordas
+            active_bg = "#37373d"   # Elementos ativos
+            active_fg = "#ffffff"   # Texto em elementos ativos
+            accent_color = "#333333"  # Cor de destaque para elementos importantes
         else:
             # Light theme colors (Professional light theme with better contrast)
-            bg_color = "#f5f5f5"     # Fundo principal (mais claro)
-            fg_color = "#333333"     # Texto principal
-            entry_bg = "#ffffff"     # Fundo de campos de entrada
-            text_bg = "#ffffff"     # Fundo de áreas de texto
-            text_fg = "#222222"     # Texto em áreas de texto (mais escuro)
-            highlight_bg = "#eaeaea" # Destaques
-            highlight_fg = "#000000" # Texto em destaques
-            tab_bg = "#e0e0e0"      # Fundo das abas
-            tab_fg = "#333333"      # Texto das abas
-            select_bg = "#cce5ff"   # Cor de seleção (azul claro)
-            select_fg = "#000000"   # Texto selecionado
-            button_bg = "#A09D9D"   # Botões principais
+            bg_color = "#f5f5f5"   # Fundo principal (mais claro)
+            fg_color = "#333333"   # Texto principal
+            entry_bg = "#ffffff"   # Fundo de campos de entrada
+            text_bg = "#ffffff"    # Fundo de áreas de texto
+            text_fg = "#222222"    # Texto em áreas de texto (mais escuro)
+            highlight_bg = "#eaeaea"  # Destaques
+            highlight_fg = "#000000"  # Texto em destaques
+            tab_bg = "#e0e0e0"     # Fundo das abas
+            tab_fg = "#333333"     # Texto das abas
+            select_bg = "#cce5ff"  # Cor de seleção (azul claro)
+            select_fg = "#000000"  # Texto selecionado
+            button_bg = "#A09D9D"  # Botões principais
             button_fg = "#ffffff"   # Texto em botões
-            border_color = "#cccccc" # Bordas
+            border_color = "#cccccc"  # Bordas
             active_bg = "#d0d0d0"   # Elementos ativos
             active_fg = "#000000"   # Texto em elementos ativos
-            accent_color = "#333333" # Cor de destaque para elementos importantes
+            accent_color = "#333333"  # Cor de destaque para elementos importantes
                     
-
-
         # Apply colors to all widgets
         self.root.configure(bg=bg_color)
         
@@ -518,6 +519,7 @@ class UVMAutoGenerator:
             except:
                 continue
     
+
 
 
 
