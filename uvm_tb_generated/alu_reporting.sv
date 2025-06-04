@@ -1,5 +1,5 @@
 // Reporting for alu
-// Automatically generated on 2025-06-03 11:36:27
+// Automatically generated on 2025-06-04 09:12:23
 
 class alu_reporting extends uvm_subscriber #(alu_transaction);
     

@@ -1,0 +1,40 @@
+// Ambiente UVM sistêmico para {{top_name}}
+    // Gerado automaticamente em {{timestamp}}
+
+    class {{top_name}}_system_env extends uvm_env;
+        // Agentes para cada submodule
+        {% for mod in hierarchy.submodules.values() %}
+        {{mod.name}}_agent {{mod.name}}_agent;
+        {% endfor %}
+        
+        // Scoreboard sistêmico
+        {{top_name}}_system_scoreboard scoreboard;
+        
+        `uvm_component_utils({{top_name}}_system_env)
+        
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+        endfunction
+        
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            
+            // Cria agentes
+            {% for mod in hierarchy.submodules.values() %}
+            {{mod.name}}_agent = {{mod.name}}_agent::type_id::create("{{mod.name}}_agent", this);
+            {% endfor %}
+            
+            // Cria scoreboard
+            scoreboard = {{top_name}}_system_scoreboard::type_id::create("scoreboard", this);
+        endfunction
+        
+        function void connect_phase(uvm_phase phase);
+            super.connect_phase(phase);
+            
+            // Conecta os agentes ao scoreboard
+            {% for mod in hierarchy.submodules.values() %}
+            {{mod.name}}_agent.monitor.analysis_port.connect(scoreboard.{{mod.name}}_export);
+            {% endfor %}
+        endfunction
+    endclass
+    

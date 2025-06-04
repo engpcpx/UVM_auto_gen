@@ -1,0 +1,41 @@
+// Testbench sistêmico para {{top_name}}
+    // Gerado automaticamente em {{timestamp}}
+
+    module {{top_name}}_system_tb;
+        // Clock e reset
+        logic clk;
+        logic reset_n;
+        
+        // Interfaces para todos os submodules
+        {% for mod in hierarchy.submodules.values() %}
+        {{mod.name}}_if {{mod.name}}_if();
+        {% endfor %}
+        
+        // Instância do DUT
+        {{top_name}} dut (
+            .clk(clk),
+            .reset_n(reset_n),
+            {% for conn in hierarchy.connections %}
+            .{{conn[1]}}({{conn[3]}}),
+            {% endfor %}
+        );
+
+        // Geração de clock
+        initial begin
+            clk = 0;
+            forever #10 clk = ~clk;
+        end
+        
+        // Ambiente UVM
+        initial begin
+            // Configura as interfaces
+            uvm_config_db#(virtual {{top_name}}_if)::set(null, "*", "dut_vif", dut_if);
+            {% for mod in hierarchy.submodules.values() %}
+            uvm_config_db#(virtual {{mod.name}}_if)::set(null, "*", "{{mod.name}}_vif", {{mod.name}}_if);
+            {% endfor %}
+            
+            // Inicia o teste
+            run_test("{{top_name}}_system_test");
+        end
+    endmodule
+    

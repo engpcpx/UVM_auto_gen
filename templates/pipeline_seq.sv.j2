@@ -1,0 +1,25 @@
+// Sequência de verificação de pipeline para {{top_name}}
+    // Gerado automaticamente em {{timestamp}}
+
+    class {{top_name}}_pipeline_seq extends uvm_sequence;
+        // Sequências para cada estágio
+        fetch_seq fetch;
+        decode_seq decode;
+        execute_seq execute;
+        
+        `uvm_object_utils({{top_name}}_pipeline_seq)
+        
+        function new(string name = "{{top_name}}_pipeline_seq");
+            super.new(name);
+        endfunction
+        
+        task body();
+            // Executa sequências em paralelo para simular o pipeline
+            fork
+                fetch.start(fetch_agent.sequencer);
+                decode.start(decode_agent.sequencer);
+                execute.start(execute_agent.sequencer);
+            join
+        endtask
+    endclass
+    
