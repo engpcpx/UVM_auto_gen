@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 VEGA - Verification Environment Generator Assembler
-Version: 5.0.0 (Unificado)
+Version: 5.0.0 (Unified)
 
 Features:
-- Suporte integrado para testes unitários e sistêmicos
-- Análise hierárquica automática
-- Plano de verificação configurável
-- Templates adaptáveis para RISC-V e designs genéricos
+- Integrated support for unit and system tests
+- Automatic hierarchical analysis
+- Configurable verification plan
+- Adaptable templates for RISC-V and generic designs
 """
 
 import os
@@ -26,13 +26,14 @@ from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from collections import defaultdict
+import traceback
 
 # ---------------------------------------------------------------
-# Estruturas de Dados Estendidas
+# Extended Data Structures
 # ---------------------------------------------------------------
 @dataclass
 class VerificationPlan:
-    """Configuração completa do plano de verificação"""
+    """Complete verification plan configuration"""
     unit_tests: Dict[str, bool] = field(default_factory=lambda: {
         'functional': True,
         'edge_cases': True,
@@ -64,7 +65,7 @@ class Port:
     direction: str  # 'input', 'output', 'inout'
     width: str = "1"
     description: str = ""
-    connected_to: str = ""  # Adicionado para armazenar conexões
+    connected_to: str = ""  # Added to store connections
     
     def __post_init__(self):
         """Validates and normalizes port data"""
@@ -85,7 +86,7 @@ class ModuleInfo:
     parameters: Dict[str, str] = field(default_factory=dict)
     clock_signals: List[str] = field(default_factory=lambda: ['clk', 'clock'])
     reset_signals: List[str] = field(default_factory=lambda: ['rst', 'reset'])
-    instances: Dict[str, str] = field(default_factory=dict)  # Novo: instâncias de submodules
+    instances: Dict[str, str] = field(default_factory=dict)  # Submodule instances
 
     def get_input_ports(self) -> List[Port]:
         """Returns only input ports"""
@@ -101,15 +102,15 @@ class ModuleInfo:
 
 @dataclass
 class ModuleHierarchy:
-    """Representa a hierarquia completa do design"""
+    """Represents the complete design hierarchy"""
     top_level: ModuleInfo
-    submodules: Dict[str, ModuleInfo]  # Nome da instância -> ModuleInfo
-    connections: List[Tuple[str, str, str, str]]  # (mod_orig, port_orig, mod_dest, port_dest)
-    file_mapping: Dict[str, str]  # Nome do módulo -> arquivo fonte
+    submodules: Dict[str, ModuleInfo]  # Instance name -> ModuleInfo
+    connections: List[Tuple[str, str, str, str]]  # (src_mod, src_port, dest_mod, dest_port)
+    file_mapping: Dict[str, str]  # Module name -> source file
 
 @dataclass
 class SystemTestConfig:
-    """Configuração para testes sistêmicos"""
+    """Configuration for system tests"""
     enable_pipeline_verification: bool = True
     check_interfaces: bool = True
     generate_cross_coverage: bool = True
@@ -122,10 +123,10 @@ class TestResult:
     failed: int = 0
     coverage: float = 0.0
     execution_time: float = 0.0
-    subsystem_results: Dict[str, Dict[str, float]] = field(default_factory=dict)  # Resultados por subsistema
+    subsystem_results: Dict[str, Dict[str, float]] = field(default_factory=dict)  # Results by subsystem
 
 # ---------------------------------------------------------------
-# Analisador Hierárquico 
+# Hierarchical Analyzer 
 # ---------------------------------------------------------------
 class RTLAnalyzer:
     """Class responsible for RTL module analysis"""
@@ -264,11 +265,11 @@ class RTLAnalyzer:
 
     @staticmethod
     def extract_hierarchy(project_dir: str) -> ModuleHierarchy:
-        """Analisa um projeto completo e extrai a hierarquia"""
+        """Analyzes a complete project and extracts the hierarchy"""
         module_files = list(Path(project_dir).glob("**/*.[svv]"))
         modules = {}
         
-        # Passo 1: Extrai todos os módulos
+        # Step 1: Extract all modules
         for file in module_files:
             try:
                 module_info = RTLAnalyzer.extract_module_info(str(file))
@@ -276,7 +277,7 @@ class RTLAnalyzer:
             except ValueError as e:
                 continue
         
-        # Passo 2: Identifica o top-level (módulo não instanciado por outros)
+        # Step 2: Identify top-level (module not instantiated by others)
         top_level_candidates = set(modules.keys())
         for module in modules.values():
             for instance in module.instances.values():
@@ -284,12 +285,12 @@ class RTLAnalyzer:
                     top_level_candidates.remove(instance)
         
         if not top_level_candidates:
-            raise ValueError("Não foi possível identificar o módulo top-level")
+            raise ValueError("Could not identify top-level module")
         
         top_level_name = next(iter(top_level_candidates))
         top_level = modules[top_level_name]
         
-        # Passo 3: Mapeia conexões hierárquicas
+        # Step 3: Map hierarchical connections
         connections = []
         for module in modules.values():
             for port in module.ports:
@@ -297,10 +298,10 @@ class RTLAnalyzer:
                     src_mod, src_port = port.connected_to.split('.')
                     connections.append((module.name, port.name, src_mod, src_port))
         
-        # Passo 4: Cria mapeamento de arquivos
+        # Step 4: Create file mapping
         file_mapping = {mod.name: str(file) for file, mod in zip(module_files, modules.values())}
         
-        # Passo 5: Filtra submodules (todos exceto o top-level)
+        # Step 5: Filter submodules (all except top-level)
         submodules = {name: mod for name, mod in modules.items() if name != top_level_name}
         
         return ModuleHierarchy(
@@ -311,19 +312,18 @@ class RTLAnalyzer:
         )
 
 # ---------------------------------------------------------------
-# Interface Gráfica 
+# Graphical Interface 
 # ---------------------------------------------------------------
 class UVMAutoGenerator:
     """Main application class"""
     
     def __init__(self, root):
-
         self.root = root
         self.root.title("VEGA v5.0.0")
         self.root.geometry("1200x900")
         self.root.minsize(800, 600)
         
-        # Inicializa variáveis de instância
+        # Initialize instance variables
         self.dut_path = tk.StringVar()
         self.output_dir = tk.StringVar(value="uvm_tb_generated")
         self.dark_mode = tk.BooleanVar(value=False)
@@ -333,7 +333,7 @@ class UVMAutoGenerator:
         self.test_results = []
         self.system_test_config = SystemTestConfig()
         
-        # Configurações personalizáveis
+        # Customizable settings
         self.custom_config = {
             'num_tests': tk.IntVar(value=100),
             'include_coverage': tk.BooleanVar(value=True),
@@ -345,9 +345,42 @@ class UVMAutoGenerator:
             'enable_statistics': tk.BooleanVar(value=True)
         }
         
-        # Inicializa a interface
-        self.setup_ui()  # Renomeado para _setup_ui para indicar que é um método interno
+        # Initialize the interface
+        self.setup_ui()
         self.setup_template_environment()
+        self.toggle_theme()
+
+    def setup_ui(self):
+        """Sets up the main GUI interface"""
+        # Create menu bar first
+        self.setup_menu()
+        
+        # Initialize all status variables before they might be accessed
+        self.info_text = None
+        self.preview_text = None
+        self.report_text = None
+        self.file_listbox = None
+        self.hierarchy_tree = None
+        self.analysis_status = None
+        self.generation_status = None
+        self.report_status = None
+        
+        # Create notebook (tab system)
+        self.notebook = ttk.Notebook(self.root)
+        
+        # Initialize tabs in specified order
+        self.init_welcome_tab()
+        self.init_setup_tab()  # This is where analysis_status gets created
+        self.init_hierarchy_tab()
+        self.init_config_tab()
+        self.init_test_scenarios_tab()
+        self.init_statistics_tab()
+        self.init_preview_tab()
+        self.init_about_tab()
+        
+        self.notebook.pack(expand=True, fill='both', padx=10, pady=10)
+        
+        # Apply initial theme
         self.toggle_theme()
 
     def setup_template_environment(self):
@@ -365,139 +398,65 @@ class UVMAutoGenerator:
         
         # Create default templates if they don't exist
         self.create_system_templates()
-    
-
-#     def create_default_templates(self):
-#         """Creates default templates if they don't exist in directory"""
-#         default_templates = {
-#             'interface.sv.j2': '''// Interface for {{ module.name }}
-# // Automatically generated on {{ timestamp }}
-
-# interface {{ module.name }}_if;
-#     // Clock and Reset
-#     logic clk;
-#     logic rst;
-    
-#     // DUT signals
-# {% for port in module.ports %}
-#     logic {% if port.width != "1" %}{{ port.width }} {% endif %}{{ port.name }};
-# {% endfor %}
-
-#     // Modports
-#     modport driver (
-#         input clk, rst,
-# {% for port in module.ports %}
-# {% if port.direction == 'input' %}
-#         output {{ port.name }}{% if not loop.last %},{% endif %}
-# {% endif %}
-# {% endfor %}
-#     );
-    
-#     modport monitor (
-#         input clk, rst,
-# {% for port in module.ports %}
-#         input {{ port.name }}{% if not loop.last %},{% endif %}
-# {% endfor %}
-#     );
-
-# endinterface
-# ''',
-#             'transaction.sv.j2': '''// Transaction for {{ module.name }}
-# // Automatically generated on {{ timestamp }}
-
-# class {{ module.name }}_transaction extends uvm_sequence_item;
-    
-#     // Transaction fields
-# {% for port in module.ports %}
-#     rand logic {% if port.width != "1" %}{{ port.width }} {% endif %}{{ port.name }};
-# {% endfor %}
-
-#     // UVM automation macros
-#     `uvm_object_utils_begin({{ module.name }}_transaction)
-# {% for port in module.ports %}
-#         `uvm_field_int({{ port.name }}, UVM_ALL_ON)
-# {% endfor %}
-#     `uvm_object_utils_end
-
-#     // Constructor
-#     function new(string name = "{{ module.name }}_transaction");
-#         super.new(name);
-#     endfunction
-
-#     // Constraints
-#     constraint valid_data {
-#         // Add specific constraints here
-#     }
-
-# endclass
-# '''
-#         }
-        
-#         for filename, content in default_templates.items():
-#             template_path = self.template_dir / filename
-#             if not template_path.exists():
-#                 with open(template_path, 'w', encoding='utf-8') as f:
-#                     f.write(content)
-    
 
     def create_system_templates(self):
         """Creates system templates if they don't exist"""
         system_templates = {
-            'system_tb.sv.j2': '''// Testbench sistêmico para {{top_name}}
-    // Gerado automaticamente em {{timestamp}}
+            'system_tb.sv.j2': '''// System testbench for {top_name}
+    // Automatically generated on {timestamp}
 
-    module {{top_name}}_system_tb;
-        // Clock e reset
+    module {top_name}_system_tb;
+        // Clock and reset
         logic clk;
         logic reset_n;
         
-        // Interfaces para todos os submodules
+        // Interfaces for all submodules
         {% for mod in hierarchy.submodules.values() %}
-        {{mod.name}}_if {{mod.name}}_if();
+        {mod.name}_if {mod.name}_if();
         {% endfor %}
         
-        // Instância do DUT
-        {{top_name}} dut (
+        // DUT instance
+        {top_name} dut (
             .clk(clk),
             .reset_n(reset_n),
             {% for conn in hierarchy.connections %}
-            .{{conn[1]}}({{conn[3]}}),
+            .{conn[1]}({conn[3]}),
             {% endfor %}
         );
 
-        // Geração de clock
+        // Clock generation
         initial begin
             clk = 0;
             forever #10 clk = ~clk;
         end
         
-        // Ambiente UVM
+        // UVM environment
         initial begin
-            // Configura as interfaces
-            uvm_config_db#(virtual {{top_name}}_if)::set(null, "*", "dut_vif", dut_if);
+            // Configure interfaces
+            uvm_config_db#(virtual {top_name}_if)::set(null, "*", "dut_vif", dut_if);
             {% for mod in hierarchy.submodules.values() %}
-            uvm_config_db#(virtual {{mod.name}}_if)::set(null, "*", "{{mod.name}}_vif", {{mod.name}}_if);
+            uvm_config_db#(virtual {mod.name}_if)::set(null, "*", "{mod.name}_vif", {mod.name}_if);
             {% endfor %}
             
-            // Inicia o teste
-            run_test("{{top_name}}_system_test");
+            // Start test
+            run_test("{top_name}_system_test");
         end
     endmodule
     ''',
             
-            'system_env.sv.j2': '''// Ambiente UVM sistêmico para {{top_name}}
-    // Gerado automaticamente em {{timestamp}}
+            'system_env.sv.j2': '''// UVM system environment for {top_name}
+    // Automatically generated on {timestamp}
 
-    class {{top_name}}_system_env extends uvm_env;
-        // Agentes para cada submodule
+    class {top_name}_system_env extends uvm_env;
+        // Agents for each submodule
         {% for mod in hierarchy.submodules.values() %}
-        {{mod.name}}_agent {{mod.name}}_agent;
+        {mod.name}_agent {mod.name}_agent;
         {% endfor %}
         
-        // Scoreboard sistêmico
-        {{top_name}}_system_scoreboard scoreboard;
+        // System scoreboard
+        {top_name}_system_scoreboard scoreboard;
         
-        `uvm_component_utils({{top_name}}_system_env)
+        `uvm_component_utils({top_name}_system_env)
         
         function new(string name, uvm_component parent);
             super.new(name, parent);
@@ -506,43 +465,43 @@ class UVMAutoGenerator:
         function void build_phase(uvm_phase phase);
             super.build_phase(phase);
             
-            // Cria agentes
+            // Create agents
             {% for mod in hierarchy.submodules.values() %}
-            {{mod.name}}_agent = {{mod.name}}_agent::type_id::create("{{mod.name}}_agent", this);
+            {mod.name}_agent = {mod.name}_agent::type_id::create("{mod.name}_agent", this);
             {% endfor %}
             
-            // Cria scoreboard
-            scoreboard = {{top_name}}_system_scoreboard::type_id::create("scoreboard", this);
+            // Create scoreboard
+            scoreboard = {top_name}_system_scoreboard::type_id::create("scoreboard", this);
         endfunction
         
         function void connect_phase(uvm_phase phase);
             super.connect_phase(phase);
             
-            // Conecta os agentes ao scoreboard
+            // Connect agents to scoreboard
             {% for mod in hierarchy.submodules.values() %}
-            {{mod.name}}_agent.monitor.analysis_port.connect(scoreboard.{{mod.name}}_export);
+            {mod.name}_agent.monitor.analysis_port.connect(scoreboard.{mod.name}_export);
             {% endfor %}
         endfunction
     endclass
     ''',
             
-            'pipeline_seq.sv.j2': '''// Sequência de verificação de pipeline para {{top_name}}
-    // Gerado automaticamente em {{timestamp}}
+            'pipeline_seq.sv.j2': '''// Pipeline verification sequence for {top_name}
+    // Automatically generated on {timestamp}
 
-    class {{top_name}}_pipeline_seq extends uvm_sequence;
-        // Sequências para cada estágio
+    class {top_name}_pipeline_seq extends uvm_sequence;
+        // Sequences for each stage
         fetch_seq fetch;
         decode_seq decode;
         execute_seq execute;
         
-        `uvm_object_utils({{top_name}}_pipeline_seq)
+        `uvm_object_utils({top_name}_pipeline_seq)
         
-        function new(string name = "{{top_name}}_pipeline_seq");
+        function new(string name = "{top_name}_pipeline_seq");
             super.new(name);
         endfunction
         
         task body();
-            // Executa sequências em paralelo para simular o pipeline
+            // Execute sequences in parallel to simulate pipeline
             fork
                 fetch.start(fetch_agent.sequencer);
                 decode.start(decode_agent.sequencer);
@@ -559,45 +518,12 @@ class UVMAutoGenerator:
                 with open(template_path, 'w', encoding='utf-8') as f:
                     f.write(content)
 
-    def setup_ui(self):
-        """Sets up the main GUI interface"""
-        # Create menu bar
-        self.setup_menu()
-        
-        # Create notebook (tab system)
-        self.notebook = ttk.Notebook(self.root)
-        
-        # Initialize tabs in specified order
-        self.init_welcome_tab()
-        self.init_setup_tab()
-        self.init_hierarchy_tab()
-        self.init_config_tab()
-        self.init_test_scenarios_tab()
-        self.init_statistics_tab()
-        self.init_preview_tab()
-        self.init_about_tab()
-        
-        self.notebook.pack(expand=True, fill='both', padx=10, pady=10)
-        
-        # State variables for UI elements
-        self.info_text = None
-        self.preview_text = None
-        self.report_text = None
-        self.file_listbox = None
-        self.hierarchy_tree = None
-        self.analysis_status = None
-        self.generation_status = None
-        self.report_status = None
-        
-        # Apply initial theme
-        self.toggle_theme()
-
     def init_hierarchy_tab(self):
-        """Cria a nova aba de visualização hierárquica"""
+        """Creates the hierarchy visualization tab"""
         tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="🌐 Hierarquia")
+        self.notebook.add(tab, text="🌐 Hierarchy")
         
-        # Painel de visualização em árvore
+        # Tree view panel
         tree_frame = ttk.Frame(tab)
         tree_frame.pack(fill='both', expand=True, padx=10, pady=10)
         
@@ -613,73 +539,98 @@ class UVMAutoGenerator:
         tree_frame.grid_rowconfigure(0, weight=1)
         tree_frame.grid_columnconfigure(0, weight=1)
         
-        # Configura colunas
+        # Configure columns
         self.hierarchy_tree["columns"] = ("type", "ports", "file")
-        self.hierarchy_tree.heading("#0", text="Módulo/Instância")
-        self.hierarchy_tree.heading("type", text="Tipo")
-        self.hierarchy_tree.heading("ports", text="Portas")
-        self.hierarchy_tree.heading("file", text="Arquivo")
+        self.hierarchy_tree.heading("#0", text="Module/Instance")
+        self.hierarchy_tree.heading("type", text="Type")
+        self.hierarchy_tree.heading("ports", text="Ports")
+        self.hierarchy_tree.heading("file", text="File")
         
-        # Botões de ação
+        # Action buttons
         btn_frame = ttk.Frame(tab)
         btn_frame.pack(fill='x', padx=10, pady=5)
         
-        ttk.Button(btn_frame, text="Carregar Projeto", 
+        ttk.Button(btn_frame, text="Load Project", 
                 command=self.load_project).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text="Mostrar Conexões",
+        ttk.Button(btn_frame, text="Show Connections",
                 command=self.show_connections).pack(side='left', padx=5)
-        ttk.Button(btn_frame, text="Gerar TB Sistêmico",
+        ttk.Button(btn_frame, text="Generate System TB",
                 command=self.generate_system_tb).pack(side='left', padx=5)
         
         return tab
 
     def enhance_config_tab(self):
-        """Adiciona configurações sistêmicas à aba de configuração"""
-        sys_frame = ttk.LabelFrame(self.config_tab, text="Configuração Sistêmica", padding=15)
+        """Adds system configuration to the configuration tab"""
+        sys_frame = ttk.LabelFrame(self.config_tab, text="System Configuration", padding=15)
         sys_frame.pack(fill='x', pady=(0, 15))
         
-        ttk.Checkbutton(sys_frame, text="Verificação de Pipeline",
+        ttk.Checkbutton(sys_frame, text="Pipeline Verification",
                     variable=tk.BooleanVar(value=self.system_test_config.enable_pipeline_verification),
                     command=lambda: setattr(self.system_test_config, 'enable_pipeline_verification', 
                                             not self.system_test_config.enable_pipeline_verification)).pack(anchor='w')
         
-        ttk.Checkbutton(sys_frame, text="Verificar Interfaces",
+        ttk.Checkbutton(sys_frame, text="Check Interfaces",
                     variable=tk.BooleanVar(value=self.system_test_config.check_interfaces),
                     command=lambda: setattr(self.system_test_config, 'check_interfaces', 
                                             not self.system_test_config.check_interfaces)).pack(anchor='w')
         
-        ttk.Checkbutton(sys_frame, text="Gerar Cobertura Cruzada",
+        ttk.Checkbutton(sys_frame, text="Generate Cross Coverage",
                     variable=tk.BooleanVar(value=self.system_test_config.generate_cross_coverage),
                     command=lambda: setattr(self.system_test_config, 'generate_cross_coverage', 
                                             not self.system_test_config.generate_cross_coverage)).pack(anchor='w')
         
     def load_project(self):
-        """Carrega um projeto completo"""
-        project_dir = filedialog.askdirectory(title="Selecione a pasta do projeto RISC-V")
-        if not project_dir:
+        """Loads a complete project"""
+        # Primeiro pede para selecionar o arquivo principal do projeto
+        project_file = filedialog.askopenfilename(
+            title="Select Project File",
+            filetypes=[
+                ("VEGA Project Files", "*.vega"),
+                ("SystemVerilog Files", "*.sv"),
+                ("Verilog Files", "*.v"),
+                ("All Files", "*.*")
+            ]
+        )
+        
+        if not project_file:
             return
         
         try:
-            self.module_hierarchy = RTLAnalyzer.extract_hierarchy(project_dir)
-            self.update_hierarchy_view()
-            messagebox.showinfo("Sucesso", f"Projeto carregado com sucesso!\nTop-level: {self.module_hierarchy.top_level.name}")
+            # Se for um arquivo .vega (projeto salvo)
+            if project_file.endswith('.vega'):
+                with open(project_file, 'r') as f:
+                    project_data = json.load(f)
+                
+                # Carrega os dados do projeto
+                project_dir = os.path.dirname(project_file)
+                self.module_hierarchy = RTLAnalyzer.extract_hierarchy(project_dir)
+                self.update_hierarchy_view()
+                messagebox.showinfo("Success", f"Project loaded successfully!\nTop-level: {self.module_hierarchy.top_level.name}")
+            
+            # Se for um arquivo RTL individual
+            elif project_file.endswith(('.sv', '.v')):
+                project_dir = os.path.dirname(project_file)
+                self.module_hierarchy = RTLAnalyzer.extract_hierarchy(project_dir)
+                self.update_hierarchy_view()
+                messagebox.showinfo("Success", f"RTL file analyzed successfully!\nTop-level: {self.module_hierarchy.top_level.name}")
+            
         except Exception as e:
-            messagebox.showerror("Erro", f"Falha ao analisar projeto: {str(e)}")
-    
+            messagebox.showerror("Error", f"Failed to load project: {str(e)}")
+        
     def update_hierarchy_view(self):
-        """Atualiza a visualização hierárquica"""
+        """Updates the hierarchy view"""
         self.hierarchy_tree.delete(*self.hierarchy_tree.get_children())
         
         if not self.module_hierarchy:
             return
         
-        # Adiciona o top-level
+        # Add top-level
         top = self.module_hierarchy.top_level
         top_id = self.hierarchy_tree.insert("", "end", text=top.name, 
                                         values=("Top-Level", len(top.ports), 
                                                 self.module_hierarchy.file_mapping.get(top.name, "")))
         
-        # Adiciona submodules
+        # Add submodules
         for inst_name, module_name in top.instances.items():
             if module_name in self.module_hierarchy.submodules:
                 mod = self.module_hierarchy.submodules[module_name]
@@ -687,37 +638,37 @@ class UVMAutoGenerator:
                                                 values=("Submodule", len(mod.ports),
                                                         self.module_hierarchy.file_mapping.get(module_name, "")))
                 
-                # Adiciona portas com conexões
+                # Add ports with connections
                 for port in mod.ports:
                     conn = f" → {port.connected_to}" if port.connected_to else ""
                     self.hierarchy_tree.insert(mod_id, "end", text=port.name,
                                             values=(port.direction, port.width, conn))
     
     def show_connections(self):
-        """Mostra um diagrama das conexões entre módulos"""
+        """Shows a diagram of connections between modules"""
         if not self.module_hierarchy:
-            messagebox.showwarning("Aviso", "Nenhum projeto carregado")
+            messagebox.showwarning("Warning", "No project loaded")
             return
         
         conn_window = tk.Toplevel(self.root)
-        conn_window.title("Conexões entre Módulos")
+        conn_window.title("Module Connections")
         
         canvas = tk.Canvas(conn_window, width=800, height=600, bg='white')
         canvas.pack(fill='both', expand=True)
         
-        # Posiciona os módulos
+        # Position modules
         module_pos = {}
         center_x, center_y = 400, 300
         radius = 200
         angle = 0
         angle_step = 360 / (len(self.module_hierarchy.submodules) + 1)
         
-        # Top-level no centro
+        # Top-level in center
         canvas.create_oval(center_x-50, center_y-50, center_x+50, center_y+50, fill='lightblue')
         canvas.create_text(center_x, center_y, text=self.module_hierarchy.top_level.name)
         module_pos[self.module_hierarchy.top_level.name] = (center_x, center_y)
         
-        # Submodules em círculo
+        # Submodules in circle
         for mod_name in self.module_hierarchy.submodules:
             angle += angle_step
             rad = angle * (3.141592653589793 / 180)
@@ -728,7 +679,7 @@ class UVMAutoGenerator:
             canvas.create_text(x, y, text=mod_name)
             module_pos[mod_name] = (x, y)
         
-        # Desenha conexões
+        # Draw connections
         for conn in self.module_hierarchy.connections:
             src_mod, src_port, dest_mod, dest_port = conn
             if src_mod in module_pos and dest_mod in module_pos:
@@ -739,13 +690,9 @@ class UVMAutoGenerator:
     def setup_menu(self):
         """Creates the menu bar"""
         menubar = tk.Menu(self.root)
-
-        """Creates the menu bar"""
-        menubar = tk.Menu(self.root)
         
         # File menu
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Open RTL File...", command=self.browse_dut)
         file_menu.add_command(label="Open RTL File...", command=self.browse_dut)
         file_menu.add_command(label="Set Output Directory...", command=self.browse_output_dir)
         file_menu.add_separator()
@@ -768,46 +715,46 @@ class UVMAutoGenerator:
         """Toggles between dark and light theme"""
         if self.dark_mode.get():
             # Dark theme colors (Professional dark theme with better contrast)
-            bg_color = "#1e1e1e"        # Fundo principal
-            fg_color = "#d4d4d4"        # Texto principal (mais claro para melhor contraste)
-            entry_bg = "#2d2d2d"        # Fundo de campos de entrada
-            text_bg = "#252526"         # Fundo de áreas de texto
-            text_fg = "#f0f0f0"         # Texto em áreas de texto
-            highlight_bg = "#333333"     # Destaques
-            highlight_fg = "#ffffff"     # Texto em destaques
-            tab_bg = "#2d2d2d"          # Fundo das abas
-            tab_fg = "#d4d4d4"          # Texto das abas
-            select_bg = "#264f78"       # Cor de seleção (azul mais suave)
-            select_fg = "#ffffff"       # Texto selecionado
-            button_bg = "#3a6ea5"       # Botões principais (azul)
-            button_fg = "#ffffff"       # Texto em botões
-            border_color = "#454545"    # Bordas
-            active_bg = "#37373d"       # Elementos ativos
-            active_fg = "#ffffff"       # Texto em elementos ativos
-            accent_color = "#3a6ea5"    # Cor de destaque para elementos importantes (azul)
-            container_bg = "#1e1e1e"    # Cor de fundo dos containers principais
-            container_fg = "#d4d4d4"    # Cor do texto nos containers
+            bg_color = "#1e1e1e"        # Main background
+            fg_color = "#d4d4d4"        # Main text (lighter for better contrast)
+            entry_bg = "#2d2d2d"        # Input field background
+            text_bg = "#252526"         # Text area background
+            text_fg = "#f0f0f0"         # Text in text areas
+            highlight_bg = "#333333"    # Highlights
+            highlight_fg = "#ffffff"    # Text in highlights
+            tab_bg = "#2d2d2d"         # Tab background
+            tab_fg = "#d4d4d4"         # Tab text
+            select_bg = "#264f78"       # Selection color (softer blue)
+            select_fg = "#ffffff"       # Selected text
+            button_bg = "#3a6ea5"       # Main buttons (blue)
+            button_fg = "#ffffff"       # Button text
+            border_color = "#454545"    # Borders
+            active_bg = "#37373d"       # Active elements
+            active_fg = "#ffffff"       # Text in active elements
+            accent_color = "#3a6ea5"    # Highlight color for important elements (blue)
+            container_bg = "#1e1e1e"    # Background color for main containers
+            container_fg = "#d4d4d4"    # Text color in containers
         else:
             # Light theme colors (Professional light theme with better contrast)
-            bg_color = "#DFDADA"        # Fundo principal (mais claro)
-            fg_color = "#333333"        # Texto principal
-            entry_bg = "#ffffff"        # Fundo de campos de entrada
-            text_bg = "#ffffff"         # Fundo de áreas de texto
-            text_fg = "#222222"         # Texto em áreas de texto (mais escuro)
-            highlight_bg = "#eaeaea"    # Destaques
-            highlight_fg = "#000000"    # Texto em destaques
-            tab_bg = "#e0e0e0"          # Fundo das abas
-            tab_fg = "#333333"          # Texto das abas
-            select_bg = "#cce5ff"       # Cor de seleção (azul claro)
-            select_fg = "#000000"       # Texto selecionado
-            button_bg = "#A09D9D"       # Botões principais
-            button_fg = "#ffffff"       # Texto em botões
-            border_color = "#cccccc"    # Bordas
-            active_bg = "#d0d0d0"       # Elementos ativos
-            active_fg = "#000000"       # Texto em elementos ativos
-            accent_color = "#333333"    # Cor de destaque para elementos importantes
-            container_bg = "#DFDADA"    # Cor de fundo dos containers principais
-            container_fg = "#333333"    # Cor do texto nos containers
+            bg_color = "#DFDADA"        # Main background (lighter)
+            fg_color = "#333333"        # Main text
+            entry_bg = "#ffffff"        # Input field background
+            text_bg = "#ffffff"         # Text area background
+            text_fg = "#222222"         # Text in text areas (darker)
+            highlight_bg = "#eaeaea"    # Highlights
+            highlight_fg = "#000000"    # Text in highlights
+            tab_bg = "#e0e0e0"          # Tab background
+            tab_fg = "#333333"          # Tab text
+            select_bg = "#cce5ff"       # Selection color (light blue)
+            select_fg = "#000000"       # Selected text
+            button_bg = "#A09D9D"       # Main buttons
+            button_fg = "#ffffff"       # Button text
+            border_color = "#cccccc"    # Borders
+            active_bg = "#d0d0d0"       # Active elements
+            active_fg = "#000000"       # Text in active elements
+            accent_color = "#333333"    # Highlight color for important elements
+            container_bg = "#DFDADA"    # Background color for main containers
+            container_fg = "#333333"    # Text color in containers
 
         # Apply colors to all widgets
         self.root.configure(bg=bg_color)
@@ -907,7 +854,7 @@ class UVMAutoGenerator:
         # Configure all children widgets recursively
         self.apply_theme_to_children(self.root, bg_color, fg_color, text_bg, text_fg, 
                                     select_bg, select_fg, border_color)
-    
+
     def apply_theme_to_children(self, widget, bg_color, fg_color, text_bg, text_fg, 
                             select_bg, select_fg, border_color):
         """Recursively applies theme to all child widgets"""
@@ -934,7 +881,7 @@ class UVMAutoGenerator:
                                 activebackground=select_bg)
                 
                 # Recursively apply to children
-                self._apply_theme_to_children(child, bg_color, fg_color, text_bg, text_fg,
+                self.apply_theme_to_children(child, bg_color, fg_color, text_bg, text_fg,
                                             select_bg, select_fg, border_color)
             except:
                 continue
@@ -967,8 +914,8 @@ class UVMAutoGenerator:
             "Welcome to VEGA, your comprehensive UVM testbench generator!\n\n"
             "This tool helps verification engineers create complete UVM environments "
             "from RTL modules with just a few clicks. Features include:\n\n"
-            "• Automatic RTL analysis and port extraction\n"
-            "• Complete UVM component generation\n"
+            "• Automatic RTL interface analysis\n"
+            "• Complete UVM testbench generation\n"
             "• Configurable test scenarios\n"
             "• Professional-grade SystemVerilog output\n"
             "• Project export capabilities\n"
@@ -1003,57 +950,57 @@ class UVMAutoGenerator:
         version_label.pack(side='bottom', pady=10)
     
     def init_setup_tab(self):
-        """Creates the setup tab"""
-        self.setup_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.setup_tab, text="⚙️ Setup")
+            """Creates the setup tab"""
+            self.setup_tab = ttk.Frame(self.notebook)
+            self.notebook.add(self.setup_tab, text="⚙️ Setup")
+            
+            main_frame = ttk.Frame(self.setup_tab)
+            main_frame.pack(fill='both', expand=True, padx=20, pady=20)
+            
+            title_label = ttk.Label(main_frame, text="Design Under Test (DUT) Analysis", style='Title.TLabel')
+            title_label.pack(anchor='w', pady=(0, 15))
+            
+            file_frame = ttk.LabelFrame(main_frame, text="RTL Module Selection", padding=15)
+            file_frame.pack(fill='x', pady=(0, 15))
+            
+            path_label = ttk.Label(file_frame, text="RTL Module Path:")
+            path_label.pack(anchor='w', pady=(0, 5))
+            
+            path_entry_frame = ttk.Frame(file_frame)
+            path_entry_frame.pack(fill='x', pady=(0, 10))
+            
+            self.path_entry = ttk.Entry(path_entry_frame, textvariable=self.dut_path, font=('Consolas', 10))
+            self.path_entry.pack(side='left', fill='x', expand=True, padx=(0, 5))
+            
+            browse_button = ttk.Button(path_entry_frame, text="Browse...", command=self.browse_dut)
+            browse_button.pack(side='right')
+            
+            analyze_button = ttk.Button(
+                file_frame,
+                text="🔍 Analyze Module",
+                style='Accent.TButton',
+                command=self.analyze_module
+            )
+            analyze_button.pack(pady=10)
+            
+            results_frame = ttk.LabelFrame(main_frame, text="Module Analysis Results", padding=15)
+            results_frame.pack(fill='both', expand=True)
+            
+            text_frame = ttk.Frame(results_frame)
+            text_frame.pack(fill='both', expand=True)
+            
+            self.info_text = scrolledtext.ScrolledText(
+                text_frame,
+                height=15,
+                state='disabled',
+                font=('Consolas', 10),
+                wrap='word'
+            )
+            self.info_text.pack(fill='both', expand=True)
+            
+            self.analysis_status = ttk.Label(results_frame, text="No module analyzed yet", foreground='gray')
+            self.analysis_status.pack(anchor='w', pady=(10, 0))
         
-        main_frame = ttk.Frame(self.setup_tab)
-        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
-        
-        title_label = ttk.Label(main_frame, text="Design Under Test (DUT) Analysis", style='Title.TLabel')
-        title_label.pack(anchor='w', pady=(0, 15))
-        
-        file_frame = ttk.LabelFrame(main_frame, text="RTL Module Selection", padding=15)
-        file_frame.pack(fill='x', pady=(0, 15))
-        
-        path_label = ttk.Label(file_frame, text="RTL Module Path:")
-        path_label.pack(anchor='w', pady=(0, 5))
-        
-        path_entry_frame = ttk.Frame(file_frame)
-        path_entry_frame.pack(fill='x', pady=(0, 10))
-        
-        self.path_entry = ttk.Entry(path_entry_frame, textvariable=self.dut_path, font=('Consolas', 10))
-        self.path_entry.pack(side='left', fill='x', expand=True, padx=(0, 5))
-        
-        browse_button = ttk.Button(path_entry_frame, text="Browse...", command=self.browse_dut)
-        browse_button.pack(side='right')
-        
-        analyze_button = ttk.Button(
-            file_frame,
-            text="🔍 Analyze Module",
-            style='Accent.TButton',
-            command=self.analyze_module
-        )
-        analyze_button.pack(pady=10)
-        
-        results_frame = ttk.LabelFrame(main_frame, text="Module Analysis Results", padding=15)
-        results_frame.pack(fill='both', expand=True)
-        
-        text_frame = ttk.Frame(results_frame)
-        text_frame.pack(fill='both', expand=True)
-        
-        self.info_text = scrolledtext.ScrolledText(
-            text_frame,
-            height=15,
-            state='disabled',
-            font=('Consolas', 10),
-            wrap='word'
-        )
-        self.info_text.pack(fill='both', expand=True)
-        
-        self.analysis_status = ttk.Label(results_frame, text="No module analyzed yet", foreground='gray')
-        self.analysis_status.pack(anchor='w', pady=(10, 0))
-    
     def init_config_tab(self):
         """Creates the testbench configuration tab"""
         self.config_tab = ttk.Frame(self.notebook)
@@ -1267,7 +1214,7 @@ class UVMAutoGenerator:
             command=self.apply_scenario_config
         )
         apply_button.pack(pady=10)
-    
+
     def init_statistics_tab(self):
         """Creates the statistics reporting tab"""
         self.statistics_tab = ttk.Frame(self.notebook)
@@ -1446,7 +1393,7 @@ class UVMAutoGenerator:
             wrap='none'
         )
         self.preview_text.pack(fill='both', expand=True)
-    
+
     def init_about_tab(self):
         """Creates the 'About' tab with software information"""
         about_tab = ttk.Frame(self.notebook)
@@ -1546,7 +1493,7 @@ class UVMAutoGenerator:
             justify="left"
         )
         req_content.pack(anchor='w')
-    
+
     def apply_scenario_config(self):
         """Applies test scenario configuration"""
         try:
@@ -1638,7 +1585,7 @@ class UVMAutoGenerator:
                 foreground='red'
             )
             messagebox.showerror("Report Error", f"Failed to generate test report: {str(e)}")
-    
+
     def update_statistics_chart(self):
         """Updates statistics chart"""
         if not self.test_results:
@@ -1737,8 +1684,10 @@ class UVMAutoGenerator:
         if path:
             self.dut_path.set(path)
             self.module_info = None
-            self.analysis_status.config(text="File selected - ready for analysis", foreground='blue')
-    
+            # Only update status if it exists
+            if hasattr(self, 'analysis_status') and self.analysis_status:
+                self.analysis_status.config(text="File selected - ready for analysis", foreground='blue')
+
     def browse_output_dir(self):
         """Opens dialog to select output directory"""
         directory = filedialog.askdirectory(
@@ -1749,42 +1698,6 @@ class UVMAutoGenerator:
         if directory:
             self.output_dir.set(directory)
     
-        # def analyze_module(self):
-        #     """Analyzes the selected RTL module"""
-        #     dut_path = self.dut_path.get().strip()
-            
-        #     if not dut_path:
-        #         messagebox.showerror("Error", "Please select an RTL file first")
-        #         return
-            
-        #     if not os.path.exists(dut_path):
-        #         messagebox.showerror("Error", f"File not found: {dut_path}")
-        #         return
-            
-        #     try:
-        #         self.analysis_status.config(text="Analyzing module...", foreground='orange')
-        #         self.root.update()
-                
-        #         self.module_info = RTLAnalyzer.extract_module_info(dut_path)
-        #         self.display_module_info()
-                
-        #         self.analysis_status.config(
-        #             text=f"✓ Analysis complete - {len(self.module_info.ports)} ports found",
-        #             foreground='green'
-        #         )
-                
-        #         self.notebook.tab(3, state='normal')  # Configuration tab
-        #         self.notebook.tab(4, state='normal')  # Test Scenarios tab
-        #         self.notebook.tab(5, state='normal')  # Statistics tab
-                
-        #     except Exception as e:
-        #         error_msg = f"Failed to analyze module: {str(e)}"
-        #         messagebox.showerror("Analysis Error", error_msg)
-        #         self.analysis_status.config(text=f"✗ Analysis failed: {str(e)}", foreground='red')
-        #         print(f"Analysis error details: {e}")
-        #         import traceback
-        #         traceback.print_exc()
-        
     def analyze_module(self):
         """Analyzes the selected RTL module"""
         dut_path = self.dut_path.get().strip()
@@ -1962,7 +1875,7 @@ class UVMAutoGenerator:
             print(f"Generation error: {e}")
             import traceback
             traceback.print_exc()
-    
+        
     def prepare_generation_context(self):
         """Prepares context for template generation"""
         config_dict = {}
@@ -2321,9 +2234,9 @@ Generation Time: {context['timestamp']}
             messagebox.showerror("Error", f"Could not open folder: {str(e)}")
 
     def generate_system_tb(self):
-        """Gera um testbench sistêmico completo"""
+        """Generates a complete system testbench"""
         if not self.module_hierarchy:
-            messagebox.showerror("Erro", "Por favor, carregue um projeto primeiro")
+            messagebox.showerror("Error", "Please load a project first")
             return
         
         try:
@@ -2337,7 +2250,7 @@ Generation Time: {context['timestamp']}
                 'top_name': self.module_hierarchy.top_level.name
             }
             
-            # Gera o testbench top-level
+            # Generate top-level testbench
             self._generate_file_from_template(
                 'system_tb.sv.j2', 
                 f"{context['top_name']}_system_tb.sv",
@@ -2345,7 +2258,7 @@ Generation Time: {context['timestamp']}
                 output_path
             )
             
-            # Gera o ambiente UVM sistêmico
+            # Generate system UVM environment
             self._generate_file_from_template(
                 'system_env.sv.j2',
                 f"{context['top_name']}_system_env.sv",
@@ -2353,7 +2266,7 @@ Generation Time: {context['timestamp']}
                 output_path
             )
             
-            # Gera sequências sistêmicas
+            # Generate system sequences
             if self.system_test_config.enable_pipeline_verification:
                 self._generate_file_from_template(
                     'pipeline_seq.sv.j2',
@@ -2362,33 +2275,13 @@ Generation Time: {context['timestamp']}
                     output_path
                 )
             
-            messagebox.showinfo("Sucesso", "Testbench sistêmico gerado com sucesso!")
+            messagebox.showinfo("Success", "System testbench generated successfully!")
             
         except Exception as e:
-            messagebox.showerror("Erro", f"Falha ao gerar testbench sistêmico: {str(e)}")
-    
-    # def _generate_file_from_template(self, template_name, output_name, context, output_path):
-    #     """Gera um arquivo a partir de um template"""
-    #     try:
-    #         template = self.template_env.get_template(template_name)
-    #         content = template.render(context)
-            
-    #         output_file = output_path / output_name
-    #         with open(output_file, 'w', encoding='utf-8') as f:
-    #             f.write(content)
-            
-    #         self.generated_files.append(str(output_file))
-    #     except TemplateNotFound:
-    #         # Usa template padrão se não encontrado
-    #         default_template = self._get_default_template(template_name, context)
-    #         if default_template:
-    #             output_file = output_path / output_name
-    #             with open(output_file, 'w', encoding='utf-8') as f:
-    #                 f.write(default_template)
-    #             self.generated_files.append(str(output_file))
-    
+            messagebox.showerror("Error", f"Failed to generate system testbench: {str(e)}")
+        
     def _generate_file_from_template(self, template_name, output_name, context, output_path):
-        """Gera um arquivo a partir de um template"""
+        """Generates a file from a template"""
         try:
             template = self.template_env.get_template(template_name)
             content = template.render(context)
@@ -2406,60 +2299,60 @@ Generation Time: {context['timestamp']}
             raise
 
     def _get_default_template(self, template_name, context):
-        """Retorna templates padrão para os novos templates sistêmicos"""
+        """Returns default templates for the new system templates"""
         templates = {
-            'system_tb.sv.j2': '''// Testbench sistêmico para {top_name}
-// Gerado automaticamente em {timestamp}
+            'system_tb.sv.j2': '''// System testbench for {top_name}
+// Automatically generated on {timestamp}
 
 module {top_name}_system_tb;
-    // Clock e reset
+    // Clock and reset
     logic clk;
     logic reset_n;
     
-    // Interfaces para todos os submodules
+    // Interfaces for all submodules
     {% for mod in hierarchy.submodules.values() %}
     {mod.name}_if {mod.name}_if();
     {% endfor %}
     
-    // Instância do DUT
+    // DUT instance
     {top_name} dut (
         .clk(clk),
         .reset_n(reset_n),
         {% for conn in hierarchy.connections %}
-        .{{conn[1]}}({{conn[3]}}),
+        .{conn[1]}({conn[3]}),
         {% endfor %}
     );
 
-    // Geração de clock
+    // Clock generation
     initial begin
         clk = 0;
         forever #10 clk = ~clk;
     end
     
-    // Ambiente UVM
+    // UVM environment
     initial begin
-        // Configura as interfaces
+        // Configure interfaces
         uvm_config_db#(virtual {top_name}_if)::set(null, "*", "dut_vif", dut_if);
         {% for mod in hierarchy.submodules.values() %}
         uvm_config_db#(virtual {mod.name}_if)::set(null, "*", "{mod.name}_vif", {mod.name}_if);
         {% endfor %}
         
-        // Inicia o teste
+        // Start test
         run_test("{top_name}_system_test");
     end
 endmodule
 '''.format(**context),
             
-            'system_env.sv.j2': '''// Ambiente UVM sistêmico para {top_name}
-// Gerado automaticamente em {timestamp}
+            'system_env.sv.j2': '''// UVM system environment for {top_name}
+// Automatically generated on {timestamp}
 
 class {top_name}_system_env extends uvm_env;
-    // Agentes para cada submodule
+    // Agents for each submodule
     {% for mod in hierarchy.submodules.values() %}
     {mod.name}_agent {mod.name}_agent;
     {% endfor %}
     
-    // Scoreboard sistêmico
+    // System scoreboard
     {top_name}_system_scoreboard scoreboard;
     
     `uvm_component_utils({top_name}_system_env)
@@ -2471,19 +2364,19 @@ class {top_name}_system_env extends uvm_env;
     function void build_phase(uvm_phase phase);
         super.build_phase(phase);
         
-        // Cria agentes
+        // Create agents
         {% for mod in hierarchy.submodules.values() %}
         {mod.name}_agent = {mod.name}_agent::type_id::create("{mod.name}_agent", this);
         {% endfor %}
         
-        // Cria scoreboard
+        // Create scoreboard
         scoreboard = {top_name}_system_scoreboard::type_id::create("scoreboard", this);
     endfunction
     
     function void connect_phase(uvm_phase phase);
         super.connect_phase(phase);
         
-        // Conecta os agentes ao scoreboard
+        // Connect agents to scoreboard
         {% for mod in hierarchy.submodules.values() %}
         {mod.name}_agent.monitor.analysis_port.connect(scoreboard.{mod.name}_export);
         {% endfor %}
@@ -2491,11 +2384,11 @@ class {top_name}_system_env extends uvm_env;
 endclass
 '''.format(**context),
             
-            'pipeline_seq.sv.j2': '''// Sequência de verificação de pipeline para {top_name}
-// Gerado automaticamente em {timestamp}
+            'pipeline_seq.sv.j2': '''// Pipeline verification sequence for {top_name}
+// Automatically generated on {timestamp}
 
 class {top_name}_pipeline_seq extends uvm_sequence;
-    // Sequências para cada estágio
+    // Sequences for each stage
     fetch_seq fetch;
     decode_seq decode;
     execute_seq execute;
@@ -2507,7 +2400,7 @@ class {top_name}_pipeline_seq extends uvm_sequence;
     endfunction
     
     task body();
-        // Executa sequências em paralelo para simular o pipeline
+        // Execute sequences in parallel to simulate pipeline
         fork
             fetch.start(fetch_agent.sequencer);
             decode.start(decode_agent.sequencer);
@@ -2519,6 +2412,176 @@ endclass
         }
         return templates.get(template_name)
 
+    def save_project(self):
+        """Saves the current project to a .vega file"""
+        if not self.module_hierarchy:
+            messagebox.showwarning("Warning", "No project to save")
+            return
+        
+        try:
+            project_file = filedialog.asksaveasfilename(
+                title="Save Project As",
+                defaultextension=".vega",
+                filetypes=[("VEGA Project Files", "*.vega"), ("All Files", "*.*")],
+                initialfile=f"{self.module_hierarchy.top_level.name}_project.vega"
+            )
+            
+            if not project_file:
+                return
+            
+            project_data = {
+                "metadata": {
+                    "version": "5.0.0",
+                    "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "tool": "VEGA"
+                },
+                "hierarchy": {
+                    "top_level": {
+                        "name": self.module_hierarchy.top_level.name,
+                        "ports": [{
+                            "name": port.name,
+                            "direction": port.direction,
+                            "width": port.width,
+                            "description": port.description,
+                            "connected_to": port.connected_to
+                        } for port in self.module_hierarchy.top_level.ports],
+                        "parameters": self.module_hierarchy.top_level.parameters,
+                        "clock_signals": self.module_hierarchy.top_level.clock_signals,
+                        "reset_signals": self.module_hierarchy.top_level.reset_signals,
+                        "instances": self.module_hierarchy.top_level.instances
+                    },
+                    "submodules": {
+                        name: {
+                            "name": module.name,
+                            "ports": [{
+                                "name": port.name,
+                                "direction": port.direction,
+                                "width": port.width,
+                                "description": port.description,
+                                "connected_to": port.connected_to
+                            } for port in module.ports],
+                            "parameters": module.parameters,
+                            "clock_signals": module.clock_signals,
+                            "reset_signals": module.reset_signals,
+                            "instances": module.instances
+                        } for name, module in self.module_hierarchy.submodules.items()
+                    },
+                    "connections": self.module_hierarchy.connections,
+                    "file_mapping": self.module_hierarchy.file_mapping
+                },
+                "config": {
+                    "system_test": {
+                        "enable_pipeline_verification": self.system_test_config.enable_pipeline_verification,
+                        "check_interfaces": self.system_test_config.check_interfaces,
+                        "generate_cross_coverage": self.system_test_config.generate_cross_coverage,
+                        "monitor_performance": self.system_test_config.monitor_performance
+                    },
+                    "custom_config": {
+                        key: var.get() if hasattr(var, 'get') else var
+                        for key, var in self.custom_config.items()
+                    }
+                }
+            }
+            
+            with open(project_file, 'w', encoding='utf-8') as f:
+                json.dump(project_data, f, indent=4)
+            
+            messagebox.showinfo("Success", f"Project saved successfully to:\n{project_file}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save project: {str(e)}")
+            print(f"Error saving project: {e}")
+            traceback.print_exc()
+
+    def browse_dut(self):
+        """Opens dialog to select RTL file"""
+        initial_dir = os.path.dirname(self.dut_path.get()) if self.dut_path.get() else os.getcwd()
+        
+        path = filedialog.askopenfilename(
+            title="Select RTL Module File",
+            initialdir=initial_dir,
+            filetypes=[
+                ("SystemVerilog Files", "*.sv"),
+                ("Verilog Files", "*.v"),
+                ("All Files", "*.*")
+            ]
+        )
+        
+        if path:
+            self.dut_path.set(path)
+            self.module_info = None
+            if hasattr(self, 'analysis_status') and self.analysis_status:
+                self.analysis_status.config(text="File selected - ready for analysis", foreground='blue')
+
+    def browse_output_dir(self):
+        """Opens dialog to select output directory"""
+        directory = filedialog.askdirectory(
+            title="Select Output Directory",
+            initialdir=self.output_dir.get() if os.path.exists(self.output_dir.get()) else os.getcwd()
+        )
+        
+        if directory:
+            self.output_dir.set(directory)
+
+    def setup_ui(self):
+        """Sets up the main GUI interface"""
+        # Create menu bar first
+        self.setup_menu()
+        
+        # Initialize all status variables before they might be accessed
+        self.info_text = None
+        self.preview_text = None
+        self.report_text = None
+        self.file_listbox = None
+        self.hierarchy_tree = None
+        self.analysis_status = None
+        self.generation_status = None
+        self.report_status = None
+        
+        # Create notebook (tab system)
+        self.notebook = ttk.Notebook(self.root)
+        
+        # Initialize tabs in specified order
+        self.init_welcome_tab()
+        self.init_setup_tab()  # This is where analysis_status gets created
+        self.init_hierarchy_tab()
+        self.init_config_tab()
+        self.init_test_scenarios_tab()
+        self.init_statistics_tab()
+        self.init_preview_tab()
+        self.init_about_tab()
+        
+        self.notebook.pack(expand=True, fill='both', padx=10, pady=10)
+        
+        # Apply initial theme
+        self.toggle_theme()
+
+    def setup_menu(self):
+        """Creates the menu bar"""
+        menubar = tk.Menu(self.root)
+        
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Open RTL File...", command=self.browse_dut)
+        file_menu.add_command(label="Set Output Directory...", command=self.browse_output_dir)
+        file_menu.add_command(label="Save Project", command=self.save_project)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.root.quit)
+        menubar.add_cascade(label="File", menu=file_menu)
+        
+        # View menu
+        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu.add_checkbutton(label="Dark Mode", variable=self.dark_mode, command=self.toggle_theme)
+        menubar.add_cascade(label="View", menu=view_menu)
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="About", command=lambda: self.notebook.select(6))
+        menubar.add_cascade(label="Help", menu=help_menu)
+        
+        self.root.config(menu=menubar)
+
+ 
 
 def main():
     """Main application function"""
