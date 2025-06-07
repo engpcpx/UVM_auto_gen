@@ -1,0 +1,31 @@
+// Transaction for {module.name}
+// Automatically generated on {timestamp}
+
+`include "{uvm_macro_path}"
+
+class {module.name}_transaction extends uvm_sequence_item;
+    // Transaction fields
+    {% for port in module.ports %}
+    rand logic {% if port.width != "1" %}{port.width} {% endif %}{port.name};
+    {% endfor %}
+    
+    // Constraints
+    constraint reasonable {{
+        // Add your constraints here
+    }}
+    
+    `uvm_object_param_utils_begin({module.name}_transaction)
+        {% for port in module.ports %}
+        `uvm_field_int({port.name}, UVM_DEFAULT)
+        {% endfor %}
+    `uvm_object_utils_end
+    
+    function new(string name = "{module.name}_transaction");
+        super.new(name);
+    endfunction
+    
+    // Convert to string for printing
+    virtual function string convert2string();
+        return $sformatf({% for port in module.ports %}"{port.name}=%0h " + {% endfor %}"""", {% for port in module.ports %}{port.name}, {% endfor %});
+    endfunction
+endclass

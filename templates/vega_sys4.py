@@ -646,6 +646,170 @@ endclass
     # Only the template-related methods and context preparation were modified
     # to support UVM macro integration
 
+
+    def setup_menu(self):
+        """Creates the menu bar with UVM-specific options"""
+        menubar = tk.Menu(self.root)
+        
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Open RTL File...", command=self.browse_dut)
+        file_menu.add_command(label="Set Output Directory...", command=self.browse_output_dir)
+        file_menu.add_command(label="Set UVM Macro Path...", 
+                            command=lambda: self.browse_file(
+                                "Select UVM Macro File", 
+                                self.custom_config['uvm_macro_path'], 
+                                [("SystemVerilog Header", "*.svh"), ("All Files", "*.*")]
+                            ))
+        file_menu.add_command(label="Save Project", command=self.save_project)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.root.quit)
+        menubar.add_cascade(label="File", menu=file_menu)
+        
+        # View menu
+        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu.add_checkbutton(label="Dark Mode", variable=self.dark_mode, command=self.toggle_theme)
+        menubar.add_cascade(label="View", menu=view_menu)
+        
+        # Tools menu (new menu for UVM-specific tools)
+        tools_menu = tk.Menu(menubar, tearoff=0)
+        tools_menu.add_command(label="Generate System Testbench", command=self.generate_system_tb)
+        tools_menu.add_command(label="Generate UVM Components", command=self.generate_uvm_env)
+        menubar.add_cascade(label="Tools", menu=tools_menu)
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="About", command=lambda: self.notebook.select(6))
+        menubar.add_cascade(label="Help", menu=help_menu)
+        
+        self.root.config(menu=menubar)
+
+
+    def browse_file(self, title, string_var, filetypes):
+        """Opens dialog to select a file"""
+        initial_dir = os.path.dirname(string_var.get()) if string_var.get() else os.getcwd()
+        
+        path = filedialog.askopenfilename(
+            title=title,
+            initialdir=initial_dir,
+            filetypes=filetypes
+        )
+        
+        if path:
+            string_var.set(path)
+
+
+    def browse_dut(self):
+        """Opens dialog to select RTL file"""
+        initial_dir = os.path.dirname(self.dut_path.get()) if self.dut_path.get() else os.getcwd()
+        
+        path = filedialog.askopenfilename(
+            title="Select RTL Module File",
+            initialdir=initial_dir,
+            filetypes=[
+                ("SystemVerilog Files", "*.sv"),
+                ("Verilog Files", "*.v"),
+                ("All Files", "*.*")
+            ]
+        )
+    
+        if path:
+            self.dut_path.set(path)
+            self.module_info = None
+            if hasattr(self, 'analysis_status') and self.analysis_status:
+                self.analysis_status.config(text="File selected - ready for analysis", foreground='blue')
+
+    def browse_output_dir(self):
+        """Opens dialog to select output directory"""
+        directory = filedialog.askdirectory(
+            title="Select Output Directory",
+            initialdir=self.output_dir.get() if os.path.exists(self.output_dir.get()) else os.getcwd()
+        )
+        
+        if directory:
+            self.output_dir.set(directory)
+
+    def save_project(self):
+        """Saves the current project to a .vega file"""
+        if not self.module_hierarchy:
+            messagebox.showwarning("Warning", "No project to save")
+            return
+        
+        try:
+            project_file = filedialog.asksaveasfilename(
+                title="Save Project As",
+                defaultextension=".vega",
+                filetypes=[("VEGA Project Files", "*.vega"), ("All Files", "*.*")],
+                initialfile=f"{self.module_hierarchy.top_level.name}_project.vega"
+            )
+            
+            if not project_file:
+                return
+            
+            project_data = {
+                "metadata": {
+                    "version": "5.0.0",
+                    "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "tool": "VEGA"
+                },
+                "hierarchy": {
+                    "top_level": {
+                        "name": self.module_hierarchy.top_level.name,
+                        "ports": [{
+                            "name": port.name,
+                            "direction": port.direction,
+                            "width": port.width,
+                            "description": port.description,
+                            "connected_to": port.connected_to
+                        } for port in self.module_hierarchy.top_level.ports],
+                        "parameters": self.module_hierarchy.top_level.parameters,
+                        "clock_signals": self.module_hierarchy.top_level.clock_signals,
+                        "reset_signals": self.module_hierarchy.top_level.reset_signals,
+                        "instances": self.module_hierarchy.top_level.instances
+                    },
+                    "submodules": {
+                        name: {
+                            "name": module.name,
+                            "ports": [{
+                                "name": port.name,
+                                "direction": port.direction,
+                                "width": port.width,
+                                "description": port.description,
+                                "connected_to": port.connected_to
+                            } for port in module.ports],
+                            "parameters": module.parameters,
+                            "clock_signals": module.clock_signals,
+                            "reset_signals": module.reset_signals,
+                            "instances": module.instances
+                        } for name, module in self.module_hierarchy.submodules.items()
+                    },
+                    "connections": self.module_hierarchy.connections,
+                    "file_mapping": self.module_hierarchy.file_mapping
+                },
+                "config": {
+                    "system_test": {
+                        "enable_pipeline_verification": self.system_test_config.enable_pipeline_verification,
+                        "check_interfaces": self.system_test_config.check_interfaces,
+                        "generate_cross_coverage": self.system_test_config.generate_cross_coverage,
+                        "monitor_performance": self.system_test_config.monitor_performance
+                    },
+                    "custom_config": {
+                        key: var.get() if hasattr(var, 'get') else var
+                        for key, var in self.custom_config.items()
+                    }
+                }
+            }
+            
+            with open(project_file, 'w', encoding='utf-8') as f:
+                json.dump(project_data, f, indent=4)
+            
+            messagebox.showinfo("Success", f"Project saved successfully to:\n{project_file}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save project: {str(e)}")
+            print(f"Error saving project: {e}")
+            traceback.print_exc()
+
     def setup_ui(self):
         """Sets up the main GUI interface with UVM macro path option"""
         # Create menu bar first

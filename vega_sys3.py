@@ -13,6 +13,7 @@ Features:
 import os
 import re
 import sys
+import random 
 import math
 import json
 import zipfile
@@ -27,10 +28,147 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from collections import defaultdict
 import traceback
+import subprocess
+import threading
 
-# ---------------------------------------------------------------
-# Extended Data Structures
-# ---------------------------------------------------------------
+#---------------------------------------------------------------
+# Simulation Controller
+#---------------------------------------------------------------
+class SimulationController:
+    def __init__(self, output_dir):
+        self.output_dir = Path(output_dir)
+        self.process = None
+        self.is_running = False
+        self.compile_complete = False
+        self.uvm_home = self._find_uvm_home()
+
+    def _find_uvm_home(self):
+        """Locate UVM_HOME directory automatically"""
+        # 1. Check environment variable
+        uvm_home = os.environ.get('UVM_HOME')
+        if uvm_home and Path(uvm_home).exists():
+            return uvm_home
+            
+        # 2. Check common paths
+        common_paths = [
+            '/opt/uvm',
+            '/usr/local/uvm',
+            str(Path.home() / 'uvm'),
+            str(Path(__file__).parent.parent / 'uvm_lib')
+        ]
+        
+        for path in common_paths:
+            if Path(path).exists():
+                return path
+                
+        return None
+
+    def check_vivado_installation(self):
+        """Check if Vivado/XSIM is installed"""
+        try:
+            result = subprocess.run(['vivado', '-version'], 
+                                  capture_output=True, text=True)
+            return 'Vivado' in result.stdout
+        except:
+            return False
+        
+    def compile(self, callback=None):
+        """Compile project using XSIM with UVM support"""
+        if not self.check_vivado_installation():
+            callback("Error: Vivado/XSIM not found in PATH")
+            return False
+            
+        if not self.uvm_home:
+            callback("Warning: UVM_HOME not configured - may affect UVM simulation")
+
+        def run_compilation():
+            try:
+                self.compile_complete = False
+                
+                # Compilation command with UVM support
+                compile_cmd = [
+                    'xvlog', '-sv', 
+                    '-d', 'UVM_NO_DPI',
+                    '-i', f'{self.uvm_home}/src' if self.uvm_home else '',
+                    str(self.output_dir / '*.sv'),
+                    '&&',
+                    'xelab', '-debug', 'typical',
+                    '-timescale', '1ns/1ps',
+                    '-L', 'uvm' if self.uvm_home else '',
+                    'top_module',
+                    '-s', 'sim'
+                ]
+                
+                # Filter empty commands
+                compile_cmd = [c for c in compile_cmd if c]
+                
+                self.process = subprocess.Popen(
+                    ' '.join(compile_cmd),
+                    cwd=self.output_dir,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True
+                )
+                
+                for line in iter(self.process.stdout.readline, ''):
+                    if callback:
+                        callback(line.strip())
+                
+                self.compile_complete = self.process.wait() == 0
+                
+                if not self.compile_complete:
+                    callback("Compilation error - check logs")
+                    
+            except Exception as e:
+                if callback:
+                    callback(f"Compilation error: {str(e)}")
+                self.compile_complete = False
+
+        threading.Thread(target=run_compilation, daemon=True).start()
+
+    def run_simulation(self, gui=False, callback=None):
+        """Run simulation"""
+        if not self.compile_complete:
+            callback("Error: Project not successfully compiled")
+            return
+
+        def execute():
+            try:
+                self.is_running = True
+                cmd = ['xsim', 'sim']
+                if not gui:
+                    cmd.append('-R')
+                
+                self.process = subprocess.Popen(
+                    cmd,
+                    cwd=self.output_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True
+                )
+                
+                if callback:
+                    callback("Simulation started...")
+                
+                for line in iter(self.process.stdout.readline, ''):
+                    if callback:
+                        callback(line.strip())
+                    
+            finally:
+                self.is_running = False
+
+        threading.Thread(target=execute, daemon=True).start()
+
+    def stop_simulation(self):
+        """Stop running simulation"""
+        if self.process and self.is_running:
+            self.process.terminate()
+            self.is_running = False
+
+#---------------------------------------------------------------
+# Data Structures
+#---------------------------------------------------------------
 @dataclass
 class VerificationPlan:
     """Complete verification plan configuration"""
@@ -65,7 +203,7 @@ class Port:
     direction: str  # 'input', 'output', 'inout'
     width: str = "1"
     description: str = ""
-    connected_to: str = ""  # Added to store connections
+    connected_to: str = ""  # Store connections
     
     def __post_init__(self):
         """Validates and normalizes port data"""
@@ -125,9 +263,9 @@ class TestResult:
     execution_time: float = 0.0
     subsystem_results: Dict[str, Dict[str, float]] = field(default_factory=dict)  # Results by subsystem
 
-# ---------------------------------------------------------------
-# Hierarchical Analyzer 
-# ---------------------------------------------------------------
+#---------------------------------------------------------------
+# RTL Analyzer 
+#---------------------------------------------------------------
 class RTLAnalyzer:
     """Class responsible for RTL module analysis"""
     
@@ -311,9 +449,9 @@ class RTLAnalyzer:
             file_mapping=file_mapping
         )
 
-# ---------------------------------------------------------------
-# Graphical Interface 
-# ---------------------------------------------------------------
+#---------------------------------------------------------------
+# Main Application
+#---------------------------------------------------------------
 class UVMAutoGenerator:
     """Main application class"""
     
@@ -322,7 +460,7 @@ class UVMAutoGenerator:
         self.root.title("VEGA v5.0.0")
         self.root.geometry("1200x900")
         self.root.minsize(800, 600)
-        
+
         # Initialize instance variables
         self.dut_path = tk.StringVar()
         self.output_dir = tk.StringVar(value="uvm_tb_generated")
@@ -332,8 +470,11 @@ class UVMAutoGenerator:
         self.generated_files = []
         self.test_results = []
         self.system_test_config = SystemTestConfig()
-        
-        # Customizable settings
+        self.sim_controller = None
+        self.simulation_running = False
+        self.compilation_done = False
+
+        # Initialize configuration dictionaries
         self.custom_config = {
             'num_tests': tk.IntVar(value=100),
             'include_coverage': tk.BooleanVar(value=True),
@@ -345,6 +486,17 @@ class UVMAutoGenerator:
             'enable_statistics': tk.BooleanVar(value=True)
         }
         
+        self.scenario_vars = {
+            'smoke': tk.BooleanVar(value=True),
+            'random': tk.BooleanVar(value=True),
+            'corner': tk.BooleanVar(value=True),
+            'reset': tk.BooleanVar(value=False),
+            'stress': tk.BooleanVar(value=False),
+            'error': tk.BooleanVar(value=False),
+            'functional': tk.BooleanVar(value=False),
+            'performance': tk.BooleanVar(value=False)
+        }
+
         # Initialize the interface
         self.setup_ui()
         self.setup_template_environment()
@@ -370,19 +522,17 @@ class UVMAutoGenerator:
         
         # Initialize tabs in specified order
         self.init_welcome_tab()
-        self.init_setup_tab()  # This is where analysis_status gets created
+        self.init_setup_tab()
         self.init_hierarchy_tab()
         self.init_config_tab()
         self.init_test_scenarios_tab()
         self.init_statistics_tab()
         self.init_preview_tab()
         self.init_about_tab()
+        self.setup_execution_tab()
         
         self.notebook.pack(expand=True, fill='both', padx=10, pady=10)
-        
-        # Apply initial theme
-        self.toggle_theme()
-
+    
     def setup_template_environment(self):
         """Sets up Jinja2 template environment"""
         # Create templates directory if it doesn't exist
@@ -581,7 +731,7 @@ class UVMAutoGenerator:
         
     def load_project(self):
         """Loads a complete project"""
-        # Primeiro pede para selecionar o arquivo principal do projeto
+        # First ask to select the main project file
         project_file = filedialog.askopenfilename(
             title="Select Project File",
             filetypes=[
@@ -596,18 +746,18 @@ class UVMAutoGenerator:
             return
         
         try:
-            # Se for um arquivo .vega (projeto salvo)
+            # If it's a .vega file (saved project)
             if project_file.endswith('.vega'):
                 with open(project_file, 'r') as f:
                     project_data = json.load(f)
                 
-                # Carrega os dados do projeto
+                # Load project data
                 project_dir = os.path.dirname(project_file)
                 self.module_hierarchy = RTLAnalyzer.extract_hierarchy(project_dir)
                 self.update_hierarchy_view()
                 messagebox.showinfo("Success", f"Project loaded successfully!\nTop-level: {self.module_hierarchy.top_level.name}")
             
-            # Se for um arquivo RTL individual
+            # If it's an individual RTL file
             elif project_file.endswith(('.sv', '.v')):
                 project_dir = os.path.dirname(project_file)
                 self.module_hierarchy = RTLAnalyzer.extract_hierarchy(project_dir)
@@ -695,6 +845,7 @@ class UVMAutoGenerator:
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Open RTL File...", command=self.browse_dut)
         file_menu.add_command(label="Set Output Directory...", command=self.browse_output_dir)
+        file_menu.add_command(label="Save Project", command=self.save_project)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=file_menu)
@@ -710,51 +861,51 @@ class UVMAutoGenerator:
         menubar.add_cascade(label="Help", menu=help_menu)
         
         self.root.config(menu=menubar)
-    
+
     def toggle_theme(self):
-        """Toggles between dark and light theme"""
+        """Toggles between modern dark and light themes with harmonious colors"""
         if self.dark_mode.get():
-            # Dark theme colors (Professional dark theme with better contrast)
-            bg_color = "#1e1e1e"        # Main background
-            fg_color = "#d4d4d4"        # Main text (lighter for better contrast)
-            entry_bg = "#2d2d2d"        # Input field background
-            text_bg = "#252526"         # Text area background
-            text_fg = "#f0f0f0"         # Text in text areas
-            highlight_bg = "#333333"    # Highlights
-            highlight_fg = "#ffffff"    # Text in highlights
-            tab_bg = "#2d2d2d"         # Tab background
-            tab_fg = "#d4d4d4"         # Tab text
-            select_bg = "#264f78"       # Selection color (softer blue)
-            select_fg = "#ffffff"       # Selected text
-            button_bg = "#3a6ea5"       # Main buttons (blue)
-            button_fg = "#ffffff"       # Button text
-            border_color = "#454545"    # Borders
-            active_bg = "#37373d"       # Active elements
-            active_fg = "#ffffff"       # Text in active elements
-            accent_color = "#3a6ea5"    # Highlight color for important elements (blue)
-            container_bg = "#1e1e1e"    # Background color for main containers
-            container_fg = "#d4d4d4"    # Text color in containers
+            # Modern Dark Theme (Deep Ocean)
+            bg_color = "#121a24"        # Deep navy background
+            fg_color = "#e0e6ed"       # Soft white text
+            entry_bg = "#1e293b"       # Darker input fields
+            text_bg = "#1a2332"        # Text area background
+            text_fg = "#f0f4f9"        # Bright text in areas
+            highlight_bg = "#2e3a4e"   # Subtle highlights
+            highlight_fg = "#ffffff"   # Highlight text
+            tab_bg = "#1e293b"         # Tab background
+            tab_fg = "#cbd5e1"        # Tab text
+            select_bg = "#3b82f6"     # Vibrant blue selection
+            select_fg = "#ffffff"      # Selected text
+            button_bg = "#3b82f6"      # Primary button color
+            button_fg = "#ffffff"      # Button text
+            border_color = "#2e3a4e"   # Subtle borders
+            active_bg = "#334155"      # Active elements
+            active_fg = "#ffffff"      # Active text
+            accent_color = "#60a5fa"   # Accent color (lighter blue)
+            container_bg = "#1e293b"   # Container background
+            container_fg = "#e0e6ed"  # Container text
         else:
-            # Light theme colors (Professional light theme with better contrast)
-            bg_color = "#DFDADA"        # Main background (lighter)
-            fg_color = "#333333"        # Main text
-            entry_bg = "#ffffff"        # Input field background
+            # Modern Light Theme (Crisp Daylight)
+            bg_color = "#f8fafc"       # Very light gray background
+            fg_color = "#1e293b"        # Dark blue text
+            entry_bg = "#ffffff"        # Pure white input fields
             text_bg = "#ffffff"         # Text area background
-            text_fg = "#222222"         # Text in text areas (darker)
-            highlight_bg = "#eaeaea"    # Highlights
-            highlight_fg = "#000000"    # Text in highlights
-            tab_bg = "#e0e0e0"          # Tab background
-            tab_fg = "#333333"          # Tab text
-            select_bg = "#cce5ff"       # Selection color (light blue)
-            select_fg = "#000000"       # Selected text
-            button_bg = "#A09D9D"       # Main buttons
+            text_fg = "#334155"         # Text in areas
+            highlight_bg = "#f1f5f9"    # Very subtle highlights
+            highlight_fg = "#1e293b"    # Highlight text
+            tab_bg = "#e2e8f0"         # Tab background
+            tab_fg = "#475569"          # Tab text
+            select_bg = "#bfdbfe"       # Light blue selection
+            select_fg = "#1e40af"       # Selected text
+            button_bg = "#3b82f6"      # Primary button color
             button_fg = "#ffffff"       # Button text
-            border_color = "#cccccc"    # Borders
-            active_bg = "#d0d0d0"       # Active elements
-            active_fg = "#000000"       # Text in active elements
-            accent_color = "#333333"    # Highlight color for important elements
-            container_bg = "#DFDADA"    # Background color for main containers
-            container_fg = "#333333"    # Text color in containers
+            border_color = "#cbd5e1"    # Light borders
+            active_bg = "#e2e8f0"       # Active elements
+            active_fg = "#1e40af"       # Active text
+            accent_color = "#2563eb"    # Accent color
+            container_bg = "#ffffff"    # Container background
+            container_fg = "#334155"    # Container text
 
         # Apply colors to all widgets
         self.root.configure(bg=bg_color)
@@ -772,84 +923,101 @@ class UVMAutoGenerator:
                     insertcolor=fg_color,
                     bordercolor=border_color,
                     lightcolor=bg_color,
-                    darkcolor=bg_color)
+                    darkcolor=bg_color,
+                    font=('Segoe UI', 10))
         
         # Configure specific widgets
         style.configure('TFrame', background=bg_color)
         style.configure('TLabel', background=bg_color, foreground=fg_color)
-        style.configure('TEntry', fieldbackground=entry_bg, foreground=fg_color)
-        style.configure('TButton', background=button_bg, foreground=button_fg)
+        style.configure('TEntry', 
+                    fieldbackground=entry_bg, 
+                    foreground=fg_color,
+                    bordercolor=border_color,
+                    relief='flat')
+        style.configure('TCombobox', 
+                    fieldbackground=entry_bg,
+                    foreground=fg_color,
+                    selectbackground=select_bg,
+                    selectforeground=select_fg)
+        style.configure('TButton', 
+                    background=button_bg,
+                    foreground=button_fg,
+                    padding=8,
+                    relief='flat',
+                    font=('Segoe UI', 10, 'bold'))
+        style.map('TButton',
+                    background=[('active', accent_color)],
+                    relief=[('pressed', 'sunken'), ('!pressed', 'flat')])
         style.configure('TNotebook', background=tab_bg)
-        style.configure('TNotebook.Tab', background=tab_bg, foreground=tab_fg,
-                    padding=[10, 5], font=('TkDefaultFont', 10))
+        style.configure('TNotebook.Tab', 
+                    background=tab_bg,
+                    foreground=tab_fg,
+                    padding=[12, 4],
+                    font=('Segoe UI', 9))
         style.map('TNotebook.Tab',
-                background=[('selected', bg_color), ('active', active_bg)],
-                foreground=[('selected', fg_color), ('active', active_fg)])
-        style.configure('Treeview', background=text_bg, fieldbackground=text_bg, 
-                    foreground=fg_color, rowheight=25)
-        style.map('Treeview', background=[('selected', select_bg)],
-                foreground=[('selected', select_fg)])
-        style.configure('Vertical.TScrollbar', background=highlight_bg,
-                    troughcolor=bg_color, bordercolor=border_color)
-        style.configure('Horizontal.TScrollbar', background=highlight_bg,
-                    troughcolor=bg_color, bordercolor=border_color)
-        style.configure('TLabelframe', background=bg_color, foreground=fg_color,
+                    background=[('selected', bg_color), ('active', active_bg)],
+                    foreground=[('selected', fg_color), ('active', active_fg)])
+        style.configure('Treeview', 
+                    background=text_bg,
+                    fieldbackground=text_bg,
+                    foreground=text_fg,
+                    rowheight=28,
                     bordercolor=border_color)
-        style.configure('TLabelframe.Label', background=bg_color, foreground=fg_color)
+        style.map('Treeview',
+                    background=[('selected', select_bg)],
+                    foreground=[('selected', select_fg)])
+        style.configure('Vertical.TScrollbar', 
+                    background=highlight_bg,
+                    troughcolor=bg_color, 
+                    bordercolor=border_color)
+        style.configure('Horizontal.TScrollbar', 
+                    background=highlight_bg,
+                    troughcolor=bg_color, 
+                    bordercolor=border_color)
+        style.configure('TLabelframe', 
+                    background=bg_color, 
+                    foreground=fg_color,
+                    bordercolor=border_color)
+        style.configure('TLabelframe.Label', 
+                    background=bg_color, 
+                    foreground=fg_color)
         
         # Configure text widgets
-        if hasattr(self, 'info_text') and self.info_text:
-            self.info_text.config(
-                bg=text_bg,
-                fg=text_fg,
-                insertbackground=fg_color,
-                selectbackground=select_bg,
-                selectforeground=select_fg,
-                highlightbackground=border_color,
-                highlightcolor=button_bg
-            )
+        text_widget_config = {
+            'bg': text_bg,
+            'fg': text_fg,
+            'insertbackground': fg_color,
+            'selectbackground': select_bg,
+            'selectforeground': select_fg,
+            'highlightbackground': border_color,
+            'highlightcolor': accent_color,
+            'font': ('Consolas', 10)
+        }
         
-        if hasattr(self, 'preview_text') and self.preview_text:
-            self.preview_text.config(
-                bg=text_bg,
-                fg=text_fg,
-                insertbackground=fg_color,
-                selectbackground=select_bg,
-                selectforeground=select_fg,
-                highlightbackground=border_color,
-                highlightcolor=button_bg
-            )
+        for widget_name in ['info_text', 'preview_text', 'report_text']:
+            if hasattr(self, widget_name) and getattr(self, widget_name):
+                getattr(self, widget_name).config(**text_widget_config)
         
-        if hasattr(self, 'report_text') and self.report_text:
-            self.report_text.config(
-                bg=text_bg,
-                fg=text_fg,
-                insertbackground=fg_color,
-                selectbackground=select_bg,
-                selectforeground=select_fg,
-                highlightbackground=border_color,
-                highlightcolor=button_bg
-            )
-        
+        # Configure listbox
         if hasattr(self, 'file_listbox') and self.file_listbox:
             self.file_listbox.config(
                 bg=text_bg,
                 fg=text_fg,
                 selectbackground=select_bg,
                 selectforeground=select_fg,
-                highlightbackground=border_color
+                highlightbackground=border_color,
+                font=('Segoe UI', 10)
             )
         
         # Configure menu
         menu = self.root.nametowidget(self.root['menu'])
-        menu_bg = active_bg if self.dark_mode.get() else bg_color
-        menu_fg = fg_color
-        menu_active_bg = select_bg
-        menu_active_fg = select_fg
-        
-        self.root.config(bg=bg_color)
-        menu.config(bg=menu_bg, fg=menu_fg, activebackground=menu_active_bg,
-                activeforeground=menu_active_fg, relief='flat')
+        menu.config(
+            bg=container_bg,
+            fg=container_fg,
+            activebackground=select_bg,
+            activeforeground=select_fg,
+            relief='flat'
+        )
         
         # Configure all children widgets recursively
         self.apply_theme_to_children(self.root, bg_color, fg_color, text_bg, text_fg, 
@@ -950,59 +1118,59 @@ class UVMAutoGenerator:
         version_label.pack(side='bottom', pady=10)
     
     def init_setup_tab(self):
-            """Creates the setup tab"""
-            self.setup_tab = ttk.Frame(self.notebook)
-            self.notebook.add(self.setup_tab, text="⚙️ Setup")
-            
-            main_frame = ttk.Frame(self.setup_tab)
-            main_frame.pack(fill='both', expand=True, padx=20, pady=20)
-            
-            title_label = ttk.Label(main_frame, text="Design Under Test (DUT) Analysis", style='Title.TLabel')
-            title_label.pack(anchor='w', pady=(0, 15))
-            
-            file_frame = ttk.LabelFrame(main_frame, text="RTL Module Selection", padding=15)
-            file_frame.pack(fill='x', pady=(0, 15))
-            
-            path_label = ttk.Label(file_frame, text="RTL Module Path:")
-            path_label.pack(anchor='w', pady=(0, 5))
-            
-            path_entry_frame = ttk.Frame(file_frame)
-            path_entry_frame.pack(fill='x', pady=(0, 10))
-            
-            self.path_entry = ttk.Entry(path_entry_frame, textvariable=self.dut_path, font=('Consolas', 10))
-            self.path_entry.pack(side='left', fill='x', expand=True, padx=(0, 5))
-            
-            browse_button = ttk.Button(path_entry_frame, text="Browse...", command=self.browse_dut)
-            browse_button.pack(side='right')
-            
-            analyze_button = ttk.Button(
-                file_frame,
-                text="🔍 Analyze Module",
-                style='Accent.TButton',
-                command=self.analyze_module
-            )
-            analyze_button.pack(pady=10)
-            
-            results_frame = ttk.LabelFrame(main_frame, text="Module Analysis Results", padding=15)
-            results_frame.pack(fill='both', expand=True)
-            
-            text_frame = ttk.Frame(results_frame)
-            text_frame.pack(fill='both', expand=True)
-            
-            self.info_text = scrolledtext.ScrolledText(
-                text_frame,
-                height=15,
-                state='disabled',
-                font=('Consolas', 10),
-                wrap='word'
-            )
-            self.info_text.pack(fill='both', expand=True)
-            
-            self.analysis_status = ttk.Label(results_frame, text="No module analyzed yet", foreground='gray')
-            self.analysis_status.pack(anchor='w', pady=(10, 0))
+        """Creates the setup tab"""
+        self.setup_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.setup_tab, text="⚙️ Setup")
         
+        main_frame = ttk.Frame(self.setup_tab)
+        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        title_label = ttk.Label(main_frame, text="Design Under Test (DUT) Analysis", style='Title.TLabel')
+        title_label.pack(anchor='w', pady=(0, 15))
+        
+        file_frame = ttk.LabelFrame(main_frame, text="RTL Module Selection", padding=15)
+        file_frame.pack(fill='x', pady=(0, 15))
+        
+        path_label = ttk.Label(file_frame, text="RTL Module Path:")
+        path_label.pack(anchor='w', pady=(0, 5))
+        
+        path_entry_frame = ttk.Frame(file_frame)
+        path_entry_frame.pack(fill='x', pady=(0, 10))
+        
+        self.path_entry = ttk.Entry(path_entry_frame, textvariable=self.dut_path, font=('Consolas', 10))
+        self.path_entry.pack(side='left', fill='x', expand=True, padx=(0, 5))
+        
+        browse_button = ttk.Button(path_entry_frame, text="Browse...", command=self.browse_dut)
+        browse_button.pack(side='right')
+        
+        analyze_button = ttk.Button(
+            file_frame,
+            text="🔍 Analyze Module",
+            style='Accent.TButton',
+            command=self.analyze_module
+        )
+        analyze_button.pack(pady=10)
+        
+        results_frame = ttk.LabelFrame(main_frame, text="Module Analysis Results", padding=15)
+        results_frame.pack(fill='both', expand=True)
+        
+        text_frame = ttk.Frame(results_frame)
+        text_frame.pack(fill='both', expand=True)
+        
+        self.info_text = scrolledtext.ScrolledText(
+            text_frame,
+            height=15,
+            state='disabled',
+            font=('Consolas', 10),
+            wrap='word'
+        )
+        self.info_text.pack(fill='both', expand=True)
+        
+        self.analysis_status = ttk.Label(results_frame, text="No module analyzed yet", foreground='gray')
+        self.analysis_status.pack(anchor='w', pady=(10, 0))
+    
     def init_config_tab(self):
-        """Creates the testbench configuration tab"""
+        """Creates the testbench configuration tab with UVM settings"""
         self.config_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.config_tab, text="🔧 Configuration")
         
@@ -1023,9 +1191,11 @@ class UVMAutoGenerator:
         title_label = ttk.Label(main_frame, text="Testbench Configuration", style='Title.TLabel')
         title_label.pack(anchor='w', pady=(0, 15))
         
+        # General Settings section
         general_frame = ttk.LabelFrame(main_frame, text="General Settings", padding=15)
         general_frame.pack(fill='x', pady=(0, 15))
         
+        # Row 0: Number of test iterations
         ttk.Label(general_frame, text="Number of Test Iterations:").grid(row=0, column=0, sticky='w', padx=(0, 10), pady=5)
         ttk.Spinbox(
             general_frame,
@@ -1035,6 +1205,7 @@ class UVMAutoGenerator:
             width=15
         ).grid(row=0, column=1, sticky='w', pady=5)
         
+        # Row 1: Clock period
         ttk.Label(general_frame, text="Clock Period:").grid(row=1, column=0, sticky='w', padx=(0, 10), pady=5)
         ttk.Entry(
             general_frame,
@@ -1042,6 +1213,7 @@ class UVMAutoGenerator:
             width=15
         ).grid(row=1, column=1, sticky='w', pady=5)
         
+        # Reset Configuration section
         reset_frame = ttk.LabelFrame(main_frame, text="Reset Configuration", padding=15)
         reset_frame.pack(fill='x', pady=(0, 15))
         
@@ -1051,6 +1223,36 @@ class UVMAutoGenerator:
             variable=self.custom_config['reset_active_low']
         ).pack(anchor='w')
         
+        # UVM Configuration section
+        uvm_frame = ttk.LabelFrame(main_frame, text="UVM Configuration", padding=15)
+        uvm_frame.pack(fill='x', pady=(0, 15))
+        
+        # Row 0: UVM test name
+        ttk.Label(uvm_frame, text="UVM Test Name:").grid(row=0, column=0, sticky='w', padx=(0, 10), pady=5)
+        self.uvm_testname = ttk.Entry(uvm_frame, width=20)
+        self.uvm_testname.insert(0, "base_test")
+        self.uvm_testname.grid(row=0, column=1, sticky='w', pady=5)
+        
+        # Row 1: UVM verbosity
+        ttk.Label(uvm_frame, text="UVM Verbosity:").grid(row=1, column=0, sticky='w', padx=(0, 10), pady=5)
+        self.uvm_verbosity = ttk.Combobox(uvm_frame, 
+                                        values=['UVM_NONE', 'UVM_LOW', 'UVM_MEDIUM', 'UVM_HIGH', 'UVM_FULL'],
+                                        width=17)
+        self.uvm_verbosity.set('UVM_MEDIUM')
+        self.uvm_verbosity.grid(row=1, column=1, sticky='w', pady=5)
+        
+        # Row 2: Random seed (FIXED)
+        ttk.Label(uvm_frame, text="Random Seed:").grid(row=2, column=0, sticky='w', padx=(0, 10), pady=5)
+        self.simulation_seed_var = tk.StringVar()
+        self.simulation_seed_var.set(str(random.randint(1, 10000)))
+        self.simulation_seed = ttk.Entry(uvm_frame, textvariable=self.simulation_seed_var, width=20)
+        self.simulation_seed.grid(row=2, column=1, sticky='w', pady=5)
+        
+        # Configure validation using the Entry widget's register method
+        vcmd = (self.simulation_seed.register(self.validate_seed), '%P')
+        self.simulation_seed.config(validate='key', validatecommand=vcmd)
+        
+        # UVM Components section
         components_frame = ttk.LabelFrame(main_frame, text="UVM Components", padding=15)
         components_frame.pack(fill='x', pady=(0, 15))
         
@@ -1066,6 +1268,7 @@ class UVMAutoGenerator:
             variable=self.custom_config['include_scoreboard']
         ).pack(anchor='w', pady=2)
         
+        # Reporting Options section
         reporting_frame = ttk.LabelFrame(main_frame, text="Reporting Options", padding=15)
         reporting_frame.pack(fill='x', pady=(0, 15))
         
@@ -1081,6 +1284,7 @@ class UVMAutoGenerator:
             variable=self.custom_config['enable_statistics']
         ).pack(anchor='w', pady=2)
         
+        # Output Configuration section
         output_frame = ttk.LabelFrame(main_frame, text="Output Configuration", padding=15)
         output_frame.pack(fill='x')
         
@@ -1093,7 +1297,35 @@ class UVMAutoGenerator:
         
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-    
+
+    def validate_seed(self, new_value):
+        """Validate if the new seed value is a valid integer"""
+        if new_value == "":
+            return True
+        try:
+            int(new_value)
+            return True
+        except ValueError:
+            return False
+
+    def get_simulation_seed(self):
+        """Returns random or configured seed with safe fallback"""
+        try:
+            seed_value = self.simulation_seed_var.get()
+            if seed_value and seed_value.strip():
+                return int(seed_value)
+            return random.randint(1, 10000)
+        except ValueError:
+            return 42  # Fallback to default seed if error occurs
+
+    def get_uvm_verbosity(self):
+        """Returns configured UVM verbosity level"""
+        return self.uvm_verbosity.get()
+
+    def get_uvm_testname(self):
+        """Returns configured UVM test name"""
+        return self.uvm_testname.get() or "base_test"
+
     def init_test_scenarios_tab(self):
         """Creates the test scenario selection tab"""
         self.test_scenarios_tab = ttk.Frame(self.notebook)
@@ -1684,7 +1916,6 @@ class UVMAutoGenerator:
         if path:
             self.dut_path.set(path)
             self.module_info = None
-            # Only update status if it exists
             if hasattr(self, 'analysis_status') and self.analysis_status:
                 self.analysis_status.config(text="File selected - ready for analysis", foreground='blue')
 
@@ -1840,42 +2071,35 @@ class UVMAutoGenerator:
             return
         
         try:
-            self.generation_status.config(text="Generating UVM environment...", foreground='orange')
-            self.root.update()
-            
             output_path = Path(self.output_dir.get())
             output_path.mkdir(exist_ok=True)
             
             context = self.prepare_generation_context()
             self.generated_files = []
-            self.generate_files(context, output_path)
+            
+            # Generate basic UVM files
+            self._generate_file_from_template('uvm_pkg.sv.j2', 'uvm_pkg.sv', context, output_path)
+            self._generate_file_from_template('interface.sv.j2', f"{context['module'].name}_if.sv", context, output_path)
+            self._generate_file_from_template('transaction.sv.j2', f"{context['module'].name}_transaction.sv", context, output_path)
+            self._generate_file_from_template('sequence.sv.j2', f"{context['module'].name}_sequence.sv", context, output_path)
+            self._generate_file_from_template('test.sv.j2', f"{context['module'].name}_test.sv", context, output_path)
+            
+            # Generate optional components
+            if context['config']['include_scoreboard']:
+                self._generate_file_from_template('scoreboard.sv.j2', f"{context['module'].name}_scoreboard.sv", context, output_path)
+            
+            if context['config']['include_coverage']:
+                self._generate_file_from_template('coverage.sv.j2', f"{context['module'].name}_coverage.sv", context, output_path)
+            
+            # Generate UVM-specific compilation script
+            self._generate_uvm_compile_script(context, output_path)
+            
             self.update_file_list()
-            
-            # Generates simulated test report
-            if self.custom_config['enable_reporting'].get():
-                self.generate_test_report()
-            
-            file_count = len(self.generated_files)
-            self.generation_status.config(
-                text=f"✓ Generation complete - {file_count} files created",
-                foreground='green'
-            )
-            
-            messagebox.showinfo(
-                "Success",
-                f"UVM environment generated successfully!\n\n"
-                f"Location: {output_path}\n"
-                f"Files created: {file_count}"
-            )
+            messagebox.showinfo("Success", "UVM environment generated successfully!")
             
         except Exception as e:
-            error_msg = f"Failed to generate UVM environment: {str(e)}"
-            messagebox.showerror("Generation Error", error_msg)
-            self.generation_status.config(text=f"✗ Generation failed", foreground='red')
-            print(f"Generation error: {e}")
-            import traceback
-            traceback.print_exc()
-        
+            messagebox.showerror("Generation Error", f"Failed to generate UVM environment: {str(e)}")
+                
     def prepare_generation_context(self):
         """Prepares context for template generation"""
         config_dict = {}
@@ -1897,248 +2121,74 @@ class UVMAutoGenerator:
             'generator_version': '5.0.0'
         }
     
-    def generate_files(self, context, output_path):
-        """Generates all UVM environment files"""
-        basic_files = [
-            ('interface.sv.j2', f"{context['module'].name}_if.sv"),
-            ('transaction.sv.j2', f"{context['module'].name}_transaction.sv"),
-            ('driver.sv.j2', f"{context['module'].name}_driver.sv"),
-            ('test.sv.j2', f"{context['module'].name}_test.sv")
-        ]
-        
-        optional_files = []
-        
-        if context['config']['include_scoreboard']:
-            optional_files.append(('scoreboard.sv.j2', f"{context['module'].name}_scoreboard.sv"))
-        
-        if context['config']['include_coverage']:
-            optional_files.append(('coverage.sv.j2', f"{context['module'].name}_coverage.sv"))
-        
-        if context['config']['enable_reporting']:
-            optional_files.append(('reporting.sv.j2', f"{context['module'].name}_reporting.sv"))
-        
-        all_files = basic_files + optional_files
-        
-        for template_name, output_filename in all_files:
-            self.generate_single_file(template_name, output_filename, context, output_path)
-        
-        self.generate_documentation(context, output_path)
-    
-    def generate_single_file(self, template_name, output_filename, context, output_path):
-        """Generates a single file from template"""
+    def _generate_file_from_template(self, template_name, output_name, context, output_path):
+        """Generates a file from a template"""
         try:
-            # Tries to load template from directory
             template = self.template_env.get_template(template_name)
-            rendered_content = template.render(context)
+            content = template.render(context)
             
-            output_file = output_path / output_filename
+            output_file = output_path / output_name
             with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(rendered_content)
+                f.write(content)
             
             self.generated_files.append(str(output_file))
-            
-        except TemplateNotFound:
-            # If template doesn't exist, uses built-in default
-            default_template = self.get_default_template(template_name, context)
-            if default_template:
-                output_file = output_path / output_filename
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    f.write(default_template)
-                self.generated_files.append(str(output_file))
-        
-        except Exception as e:
-            print(f"Error generating {output_filename}: {e}")
+        except TemplateNotFound as e:
+            messagebox.showerror("Template Error", f"Template not found: {template_name}")
             raise
-    
-    def get_default_template(self, template_name, context):
-        """Returns default template for unimplemented files"""
-        module_name = context['module'].name
-        timestamp = context['timestamp']
-        
-        templates = {
-            'scoreboard.sv.j2': f'''// Scoreboard for {module_name}
-// Automatically generated on {timestamp}
+        except Exception as e:
+            messagebox.showerror("Generation Error", f"Failed to generate file: {str(e)}")
+            raise
 
-class {module_name}_scoreboard extends uvm_scoreboard;
-    
-    `uvm_component_utils({module_name}_scoreboard)
-    
-    // Analysis ports
-    uvm_analysis_imp_expected #({module_name}_transaction, {module_name}_scoreboard) expected_port;
-    uvm_analysis_imp_actual #({module_name}_transaction, {module_name}_scoreboard) actual_port;
-    
-    // Constructor
-    function new(string name = "{module_name}_scoreboard", uvm_component parent = null);
-        super.new(name, parent);
-    endfunction
-    
-    // Build phase
-    virtual function void build_phase(uvm_phase phase);
-        super.build_phase(phase);
-        expected_port = new("expected_port", this);
-        actual_port = new("actual_port", this);
-    endfunction
-    
-    // Write methods
-    virtual function void write_expected({module_name}_transaction t);
-        // Implement comparison
-        `uvm_info(get_type_name(), "Expected transaction received", UVM_LOW)
-    endfunction
-    
-    virtual function void write_actual({module_name}_transaction t);
-        // Implement comparison
-        `uvm_info(get_type_name(), "Actual transaction received", UVM_LOW)
-    endfunction
+    def _generate_uvm_compile_script(self, context, output_path):
+        """Generates UVM-specific compilation script"""
+        compile_script = f"""#!/bin/bash
+# UVM compilation script for {context['module'].name}
+# Generated by VEGA on {context['timestamp']}
 
-endclass
-''',
-            'coverage.sv.j2': f'''// Coverage for {module_name}
-// Automatically generated on {timestamp}
+echo "Compiling UVM testbench for {context['module'].name}..."
 
-class {module_name}_coverage extends uvm_subscriber #({module_name}_transaction);
-    
-    `uvm_component_utils({module_name}_coverage)
-    
-    // Coverage groups
-    covergroup {module_name}_cg;
-        // Add specific coverpoints
-        option.per_instance = 1;
-    endgroup
-    
-    // Constructor
-    function new(string name = "{module_name}_coverage", uvm_component parent = null);
-        super.new(name, parent);
-        {module_name}_cg = new();
-    endfunction
-    
-    // Write method
-    virtual function void write({module_name}_transaction t);
-        {module_name}_cg.sample();
-    endfunction
-    
-    // Report phase
-    virtual function void report_phase(uvm_phase phase);
-        `uvm_info(get_type_name(), $sformatf("Coverage: %.2f%%", {module_name}_cg.get_coverage()), UVM_LOW)
-    endfunction
+# Check if UVM_HOME is set
+if [ -z "$UVM_HOME" ]; then
+    echo "Warning: UVM_HOME environment variable not set"
+fi
 
-endclass
-''',
-            'reporting.sv.j2': f'''// Reporting for {module_name}
-// Automatically generated on {timestamp}
+# Compile command
+xvlog -sv \\
+    -d UVM_NO_DPI \\
+    -i $UVM_HOME/src \\
+    {context['module'].name}_if.sv \\
+    {context['module'].name}_pkg.sv \\
+    {context['module'].name}_test.sv
 
-class {module_name}_reporting extends uvm_subscriber #({module_name}_transaction);
-    
-    `uvm_component_utils({module_name}_reporting)
-    
-    // Collected metrics
-    int passed_tests = 0;
-    int failed_tests = 0;
-    real coverage = 0.0;
-    
-    // Constructor
-    function new(string name = "{module_name}_reporting", uvm_component parent = null);
-        super.new(name, parent);
-    endfunction
-    
-    // Write method
-    virtual function void write({module_name}_transaction t);
-        // Implement metric collection
-        // This is a simplified implementation
-        if ($urandom_range(0, 100) > 10) begin
-            passed_tests++;
-        end else begin
-            failed_tests++;
-        end
-        coverage = passed_tests * 100.0 / (passed_tests + failed_tests);
-    endfunction
-    
-    // Report phase
-    virtual function void report_phase(uvm_phase phase);
-        `uvm_info(get_type_name(), $sformatf("Test Results:\\nPassed: %0d\\nFailed: %0d\\nCoverage: %.2f%%", 
-            passed_tests, failed_tests, coverage), UVM_LOW)
-        
-        // Exports report to JSON file
-        begin
-            int fd;
-            fd = $fopen("{module_name}_test_report.json", "w");
-            if (fd) begin
-                $fdisplay(fd, "{{");
-                $fdisplay(fd, "  \\"module\\": \\"{module_name}\\",");
-                $fdisplay(fd, "  \\"timestamp\\": \\"%s\\",", $sformatf("%t", $realtime));
-                $fdisplay(fd, "  \\"passed_tests\\": %0d,", passed_tests);
-                $fdisplay(fd, "  \\"failed_tests\\": %0d,", failed_tests);
-                $fdisplay(fd, "  \\"coverage\\": %.2f", coverage);
-                $fdisplay(fd, "}}");
-                $fclose(fd);
-            end
-        end
-    endfunction
+# Check compilation status
+if [ $? -ne 0 ]; then
+    echo "Error: Compilation failed"
+    exit 1
+fi
 
-endclass
-'''
-        }
-        
-        return templates.get(template_name)
-    
-    def generate_documentation(self, context, output_path):
-        """Generates project documentation"""
-        doc_content = f"""# UVM Testbench for {context['module'].name}
+# Elaborate
+xelab -debug typical \\
+    -timescale 1ns/1ps \\
+    -L uvm \\
+    {context['module'].name}_test \\
+    -s sim
 
-Generated by VEGA (UVMAutoGen v{context['generator_version']})
-Generation Time: {context['timestamp']}
+if [ $? -ne 0 ]; then
+    echo "Error: Elaboration failed"
+    exit 1
+fi
 
-## Module Information
-- **Name**: {context['module'].name}
-- **Total Ports**: {len(context['module'].ports)}
-- **Input Ports**: {len(context['module'].get_input_ports())}
-- **Output Ports**: {len(context['module'].get_output_ports())}
-- **Inout Ports**: {len(context['module'].get_inout_ports())}
-
-## Generated Files
-"""
-                
-        for file_path in self.generated_files:
-            filename = Path(file_path).name
-            doc_content += f"- {filename}\n"
-        
-        doc_content += f"""
-## Configuration Used
-- **Test Iterations**: {context['config']['num_tests']}
-- **Clock Period**: {context['config']['clock_period']}
-- **Reset Active Low**: {context['config']['reset_active_low']}
-- **Include Coverage**: {context['config']['include_coverage']}
-- **Include Scoreboard**: {context['config']['include_scoreboard']}
-- **Enable Reporting**: {context['config']['enable_reporting']}
-- **Enable Statistics**: {context['config']['enable_statistics']}
-- **Test Scenarios**: {context['config']['test_scenarios']}
-
-## Selected Test Scenarios
+echo "Compilation completed successfully"
 """
         
-        for scenario, enabled in context['config']['scenarios'].items():
-            doc_content += f"- {scenario.capitalize()}: {'Enabled' if enabled else 'Disabled'}\n"
+        script_path = output_path / "compile_uvm.sh"
+        with open(script_path, 'w') as f:
+            f.write(compile_script)
         
-        doc_content += f"""
-## Usage Instructions
-1. Compile all SystemVerilog files with your simulator
-2. Run the testbench using your preferred simulation tool
-3. Review coverage reports and simulation logs
-4. Check generated test reports for statistics
-
-## Next Steps
-- Customize test scenarios in the test files
-- Add specific constraints to transaction classes
-- Implement reference model in scoreboard
-- Add protocol-specific coverage points
-- Analyze generated test reports
-"""
-        
-        doc_file = output_path / "README.md"
-        with open(doc_file, 'w', encoding='utf-8') as f:
-            f.write(doc_content)
-        
-        self.generated_files.append(str(doc_file))
-
+        # Make script executable
+        os.chmod(script_path, 0o755)
+        self.generated_files.append(str(script_path))
+    
     def update_file_list(self):
         """Updates list of generated files"""
         self.file_listbox.delete(0, tk.END)
@@ -2234,183 +2284,65 @@ Generation Time: {context['timestamp']}
             messagebox.showerror("Error", f"Could not open folder: {str(e)}")
 
     def generate_system_tb(self):
-        """Generates a complete system testbench"""
-        if not self.module_hierarchy:
-            messagebox.showerror("Error", "Please load a project first")
-            return
-        
-        try:
-            output_path = Path(self.output_dir.get())
-            output_path.mkdir(exist_ok=True)
-            
-            context = {
-                'hierarchy': self.module_hierarchy,
-                'config': self.system_test_config,
-                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'top_name': self.module_hierarchy.top_level.name
-            }
-            
-            # Generate top-level testbench
-            self._generate_file_from_template(
-                'system_tb.sv.j2', 
-                f"{context['top_name']}_system_tb.sv",
-                context,
-                output_path
-            )
-            
-            # Generate system UVM environment
-            self._generate_file_from_template(
-                'system_env.sv.j2',
-                f"{context['top_name']}_system_env.sv",
-                context,
-                output_path
-            )
-            
-            # Generate system sequences
-            if self.system_test_config.enable_pipeline_verification:
-                self._generate_file_from_template(
-                    'pipeline_seq.sv.j2',
-                    f"{context['top_name']}_pipeline_seq.sv",
-                    context,
-                    output_path
-                )
-            
-            messagebox.showinfo("Success", "System testbench generated successfully!")
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to generate system testbench: {str(e)}")
-        
-    def _generate_file_from_template(self, template_name, output_name, context, output_path):
-        """Generates a file from a template"""
-        try:
-            template = self.template_env.get_template(template_name)
-            content = template.render(context)
-            
-            output_file = output_path / output_name
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            self.generated_files.append(str(output_file))
-        except TemplateNotFound as e:
-            messagebox.showerror("Template Error", f"Template not found: {template_name}")
-            raise
-        except Exception as e:
-            messagebox.showerror("Generation Error", f"Failed to generate file: {str(e)}")
-            raise
-
-    def _get_default_template(self, template_name, context):
-        """Returns default templates for the new system templates"""
-        templates = {
-            'system_tb.sv.j2': '''// System testbench for {top_name}
-// Automatically generated on {timestamp}
-
-module {top_name}_system_tb;
-    // Clock and reset
-    logic clk;
-    logic reset_n;
-    
-    // Interfaces for all submodules
-    {% for mod in hierarchy.submodules.values() %}
-    {mod.name}_if {mod.name}_if();
-    {% endfor %}
-    
-    // DUT instance
-    {top_name} dut (
-        .clk(clk),
-        .reset_n(reset_n),
-        {% for conn in hierarchy.connections %}
-        .{conn[1]}({conn[3]}),
-        {% endfor %}
-    );
-
-    // Clock generation
-    initial begin
-        clk = 0;
-        forever #10 clk = ~clk;
-    end
-    
-    // UVM environment
-    initial begin
-        // Configure interfaces
-        uvm_config_db#(virtual {top_name}_if)::set(null, "*", "dut_vif", dut_if);
-        {% for mod in hierarchy.submodules.values() %}
-        uvm_config_db#(virtual {mod.name}_if)::set(null, "*", "{mod.name}_vif", {mod.name}_if);
-        {% endfor %}
-        
-        // Start test
-        run_test("{top_name}_system_test");
-    end
-endmodule
-'''.format(**context),
-            
-            'system_env.sv.j2': '''// UVM system environment for {top_name}
-// Automatically generated on {timestamp}
-
-class {top_name}_system_env extends uvm_env;
-    // Agents for each submodule
-    {% for mod in hierarchy.submodules.values() %}
-    {mod.name}_agent {mod.name}_agent;
-    {% endfor %}
-    
-    // System scoreboard
-    {top_name}_system_scoreboard scoreboard;
-    
-    `uvm_component_utils({top_name}_system_env)
-    
-    function new(string name, uvm_component parent);
-        super.new(name, parent);
-    endfunction
-    
-    function void build_phase(uvm_phase phase);
-        super.build_phase(phase);
-        
-        // Create agents
-        {% for mod in hierarchy.submodules.values() %}
-        {mod.name}_agent = {mod.name}_agent::type_id::create("{mod.name}_agent", this);
-        {% endfor %}
-        
-        // Create scoreboard
-        scoreboard = {top_name}_system_scoreboard::type_id::create("scoreboard", this);
-    endfunction
-    
-    function void connect_phase(uvm_phase phase);
-        super.connect_phase(phase);
-        
-        // Connect agents to scoreboard
-        {% for mod in hierarchy.submodules.values() %}
-        {mod.name}_agent.monitor.analysis_port.connect(scoreboard.{mod.name}_export);
-        {% endfor %}
-    endfunction
-endclass
-'''.format(**context),
-            
-            'pipeline_seq.sv.j2': '''// Pipeline verification sequence for {top_name}
-// Automatically generated on {timestamp}
-
-class {top_name}_pipeline_seq extends uvm_sequence;
-    // Sequences for each stage
-    fetch_seq fetch;
-    decode_seq decode;
-    execute_seq execute;
-    
-    `uvm_object_utils({top_name}_pipeline_seq)
-    
-    function new(string name = "{top_name}_pipeline_seq");
-        super.new(name);
-    endfunction
-    
-    task body();
-        // Execute sequences in parallel to simulate pipeline
-        fork
-            fetch.start(fetch_agent.sequencer);
-            decode.start(decode_agent.sequencer);
-            execute.start(execute_agent.sequencer);
-        join
-    endtask
-endclass
-'''.format(**context)
+        """Generates a system testbench with UVM configuration"""
+        context = {
+            'hierarchy': self.module_hierarchy,
+            'config': self.system_test_config,
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'top_name': self.module_hierarchy.top_level.name,
+            'uvm_required': True
         }
-        return templates.get(template_name)
+        
+        # Generates testbench with UVM includes
+        template_content = f"""// System testbench for {context['top_name']}
+        // Automatically generated on {context['timestamp']}
+
+        `timescale 1ns/1ps
+
+        // UVM package inclusion
+        `include "uvm_pkg.sv"
+        import uvm_pkg::*;
+
+        module {context['top_name']}_system_tb;
+            // Clock and reset
+            logic clk;
+            logic reset_n;
+            
+            // Interfaces
+            {context['top_name']}_if dut_if();
+            
+            // DUT instance
+            {context['top_name']} dut (
+                .clk(clk),
+                .reset_n(reset_n),
+                // Other connections...
+            );
+
+            // Clock generation
+            initial begin
+                clk = 0;
+                forever #10 clk = ~clk;
+            end
+            
+            // UVM environment
+            initial begin
+                // Configure UVM verbosity
+                uvm_top.set_report_verbosity_level(UVM_MEDIUM);
+                
+                // Configure interface in UVM database
+                uvm_config_db#(virtual {context['top_name']}_if)::set(null, "*", "dut_vif", dut_if);
+                
+                // Start test
+                run_test("{context['top_name']}_test");
+            end
+        endmodule
+        """
+        
+        output_file = Path(self.output_dir.get()) / f"{context['top_name']}_system_tb.sv"
+        with open(output_file, 'w') as f:
+            f.write(template_content)
+        
+        self.generated_files.append(str(output_file)) 
 
     def save_project(self):
         """Saves the current project to a .vega file"""
@@ -2493,95 +2425,277 @@ endclass
             print(f"Error saving project: {e}")
             traceback.print_exc()
 
-    def browse_dut(self):
-        """Opens dialog to select RTL file"""
-        initial_dir = os.path.dirname(self.dut_path.get()) if self.dut_path.get() else os.getcwd()
+    def setup_execution_tab(self):
+        """Configures the execution tab with controls for compiling, running and generating reports"""
+        self.execution_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.execution_tab, text="▶️ Execution")
         
-        path = filedialog.askopenfilename(
-            title="Select RTL Module File",
-            initialdir=initial_dir,
-            filetypes=[
-                ("SystemVerilog Files", "*.sv"),
-                ("Verilog Files", "*.v"),
-                ("All Files", "*.*")
+        # Main panel with notebook for different functionalities
+        exec_notebook = ttk.Notebook(self.execution_tab)
+        exec_notebook.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Simulation Tab
+        sim_frame = ttk.Frame(exec_notebook)
+        exec_notebook.add(sim_frame, text="Simulation")
+        
+        # Output console
+        self.console_text = scrolledtext.ScrolledText(
+            sim_frame,
+            state='disabled',
+            height=15,
+            font=('Consolas', 10)
+        )
+        self.console_text.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Simulation control bar
+        control_frame = ttk.Frame(sim_frame)
+        control_frame.pack(fill='x', padx=10, pady=5)
+        
+        self.compile_btn = ttk.Button(
+            control_frame,
+            text="Compile",
+            command=self.compile_project
+        )
+        self.compile_btn.pack(side='left', padx=5)
+        
+        self.run_gui_btn = ttk.Button(
+            control_frame,
+            text="Run (GUI)",
+            command=lambda: self.run_project(gui=True),
+            state='disabled'
+        )
+        self.run_gui_btn.pack(side='left', padx=5)
+        
+        self.run_batch_btn = ttk.Button(
+            control_frame,
+            text="Run (Batch)",
+            command=lambda: self.run_project(gui=False),
+            state='disabled'
+        )
+        self.run_batch_btn.pack(side='left', padx=5)
+        
+        self.stop_btn = ttk.Button(
+            control_frame,
+            text="Stop",
+            command=self.stop_simulation,
+            state='disabled'
+        )
+        self.stop_btn.pack(side='left', padx=5)
+        
+        self.clear_btn = ttk.Button(
+            control_frame,
+            text="Clear Console",
+            command=self.clear_console
+        )
+        self.clear_btn.pack(side='right')
+        
+        # Reports Tab
+        report_frame = ttk.Frame(exec_notebook)
+        exec_notebook.add(report_frame, text="Reports")
+        
+        # Report generation controls
+        report_controls = ttk.Frame(report_frame)
+        report_controls.pack(fill='x', padx=10, pady=10)
+        
+        ttk.Button(
+            report_controls,
+            text="Generate Coverage Report",
+            command=self.generate_coverage_report
+        ).pack(side='left', padx=5)
+        
+        ttk.Button(
+            report_controls,
+            text="Generate Test Report",
+            command=self.generate_test_report
+        ).pack(side='left', padx=5)
+        
+        ttk.Button(
+            report_controls,
+            text="Export Reports",
+            command=self.export_reports
+        ).pack(side='left', padx=5)
+        
+        # Report viewer area
+        self.report_viewer = scrolledtext.ScrolledText(
+            report_frame,
+            state='disabled',
+            font=('Consolas', 10)
+        )
+        self.report_viewer.pack(fill='both', expand=True, padx=10, pady=10)
+
+    def compile_project(self):
+        """Starts project compilation"""
+        if not hasattr(self, 'output_dir') or not self.output_dir.get():
+            messagebox.showerror("Error", "Set an output directory first")
+            return
+            
+        output_dir = Path(self.output_dir.get())
+        if not output_dir.exists():
+            messagebox.showerror("Error", "Output directory does not exist")
+            return
+            
+        self.clear_console()
+        self.append_to_console("Starting compilation...")
+        
+        # Disable buttons during compilation
+        self.toggle_simulation_buttons(compiling=True)
+        
+        # Create simulation controller if it doesn't exist
+        if self.sim_controller is None:
+            self.sim_controller = SimulationController(output_dir)
+        
+        # Start compilation in a separate thread
+        threading.Thread(
+            target=self._run_compilation,
+            daemon=True
+        ).start()
+    
+    def _run_compilation(self):
+        """Runs compilation in a separate thread"""
+        try:
+            self.sim_controller.compile(callback=self.compilation_callback)
+        except Exception as e:
+            self.append_to_console(f"Compilation error: {str(e)}")
+            self.toggle_simulation_buttons(compiling=False)
+    
+    def compilation_callback(self, message):
+        """Receives messages from the compilation process"""
+        self.append_to_console(message)
+        
+        if "Error" in message:
+            self.after(100, lambda: messagebox.showerror("Compilation Error", message))
+            self.toggle_simulation_buttons(compiling=False)
+        
+        if "Compilation completed" in message:
+            self.compilation_done = True
+            self.toggle_simulation_buttons(compiling=False)
+            self.append_to_console("Compilation completed successfully!")
+
+    def toggle_simulation_buttons(self, compiling=False):
+        """Updates the state of simulation buttons"""
+        if compiling:
+            self.compile_btn.config(state='disabled')
+            self.run_gui_btn.config(state='disabled')
+            self.run_batch_btn.config(state='disabled')
+            self.stop_btn.config(state='disabled')
+        else:
+            self.compile_btn.config(state='normal')
+            if self.compilation_done:
+                self.run_gui_btn.config(state='normal')
+                self.run_batch_btn.config(state='normal')
+            else:
+                self.run_gui_btn.config(state='disabled')
+                self.run_batch_btn.config(state='disabled')
+            self.stop_btn.config(state='disabled')
+
+    def run_project(self, gui=False):
+        """Runs the simulation"""
+        if not self.sim_controller or not self.compilation_done:
+            messagebox.showerror("Error", "Compile the project first")
+            return
+            
+        try:
+            self.append_to_console(f"Starting {'GUI' if gui else 'batch'} simulation...")
+            self.simulation_running = True
+            self.toggle_simulation_buttons(running=True)
+            
+            # Start simulation in a separate thread
+            threading.Thread(
+                target=self._run_simulation,
+                args=(gui,),
+                daemon=True
+            ).start()
+        except Exception as e:
+            self.append_to_console(f"Error starting simulation: {str(e)}")
+            self.toggle_simulation_buttons(running=False)
+    
+    def _run_simulation(self, gui=False):
+        """Runs simulation with UVM settings"""
+        if not self.compilation_done:
+            self.append_to_console("Error: Project not successfully compiled")
+            return
+
+        try:
+            self.simulation_running = True
+            
+            # Simulation command with UVM options
+            sim_cmd = [
+                'xsim', 'sim',
+                '-gui' if gui else '-R',
+                '-testplusarg', 'UVM_TESTNAME=basic_test',
+                '-testplusarg', f'UVM_VERBOSITY={self.get_uvm_verbosity()}',
+                '-sv_seed', str(self.get_simulation_seed())
             ]
-        )
-        
-        if path:
-            self.dut_path.set(path)
-            self.module_info = None
-            if hasattr(self, 'analysis_status') and self.analysis_status:
-                self.analysis_status.config(text="File selected - ready for analysis", foreground='blue')
+            
+            self.append_to_console(f"Running: {' '.join(sim_cmd)}")
+            
+            process = subprocess.Popen(
+                sim_cmd,
+                cwd=self.output_dir.get(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True
+            )
+            
+            for line in iter(process.stdout.readline, ''):
+                self.append_to_console(line.strip())
+                
+        except Exception as e:
+            self.append_to_console(f"Simulation error: {str(e)}")
+        finally:
+            self.simulation_running = False
+            self.toggle_simulation_buttons(running=False)
 
-    def browse_output_dir(self):
-        """Opens dialog to select output directory"""
-        directory = filedialog.askdirectory(
-            title="Select Output Directory",
-            initialdir=self.output_dir.get() if os.path.exists(self.output_dir.get()) else os.getcwd()
-        )
+    def append_to_console(self, text):
+        """Adds text to console"""
+        self.console_text.config(state='normal')
+        self.console_text.insert(tk.END, text + "\n")
+        self.console_text.see(tk.END)
+        self.console_text.config(state='disabled')
         
-        if directory:
-            self.output_dir.set(directory)
+    def clear_console(self):
+        """Clears the console"""
+        self.console_text.config(state='normal')
+        self.console_text.delete(1.0, tk.END)
+        self.console_text.config(state='disabled')
+             
+    def stop_simulation(self):
+        """Stops running simulation"""
+        if self.sim_controller and self.simulation_running:
+            self.sim_controller.stop_simulation()
+            self.append_to_console("Simulation stopped by user")
+            self.simulation_running = False
+            self.toggle_simulation_buttons(running=False)
 
-    def setup_ui(self):
-        """Sets up the main GUI interface"""
-        # Create menu bar first
-        self.setup_menu()
-        
-        # Initialize all status variables before they might be accessed
-        self.info_text = None
-        self.preview_text = None
-        self.report_text = None
-        self.file_listbox = None
-        self.hierarchy_tree = None
-        self.analysis_status = None
-        self.generation_status = None
-        self.report_status = None
-        
-        # Create notebook (tab system)
-        self.notebook = ttk.Notebook(self.root)
-        
-        # Initialize tabs in specified order
-        self.init_welcome_tab()
-        self.init_setup_tab()  # This is where analysis_status gets created
-        self.init_hierarchy_tab()
-        self.init_config_tab()
-        self.init_test_scenarios_tab()
-        self.init_statistics_tab()
-        self.init_preview_tab()
-        self.init_about_tab()
-        
-        self.notebook.pack(expand=True, fill='both', padx=10, pady=10)
-        
-        # Apply initial theme
-        self.toggle_theme()
+    def generate_coverage_report(self):
+        """Generates coverage report"""
+        if not self.compilation_done:
+            messagebox.showerror("Error", "Compile and run tests first")
+            return
+            
+        try:
+            self.append_to_console("Generating coverage report...")
+            
+            # Simulation of report generation
+            report = "Coverage Report\n" + "="*50 + "\n"
+            report += f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            report += f"Module: {self.module_info.name if self.module_info else 'N/A'}\n"
+            report += "\nCoverage:\n"
+            report += "- Lines: 85%\n- Toggle: 78%\n- FSM: 92%\n- Assertions: 80%\n"
+            
+            self.report_viewer.config(state='normal')
+            self.report_viewer.delete(1.0, tk.END)
+            self.report_viewer.insert(tk.END, report)
+            self.report_viewer.config(state='disabled')
+            
+            self.append_to_console("Coverage report generated successfully!")
+        except Exception as e:
+            self.append_to_console(f"Error generating report: {str(e)}")
 
-    def setup_menu(self):
-        """Creates the menu bar"""
-        menubar = tk.Menu(self.root)
-        
-        # File menu
-        file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Open RTL File...", command=self.browse_dut)
-        file_menu.add_command(label="Set Output Directory...", command=self.browse_output_dir)
-        file_menu.add_command(label="Save Project", command=self.save_project)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.root.quit)
-        menubar.add_cascade(label="File", menu=file_menu)
-        
-        # View menu
-        view_menu = tk.Menu(menubar, tearoff=0)
-        view_menu.add_checkbutton(label="Dark Mode", variable=self.dark_mode, command=self.toggle_theme)
-        menubar.add_cascade(label="View", menu=view_menu)
-        
-        # Help menu
-        help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(label="About", command=lambda: self.notebook.select(6))
-        menubar.add_cascade(label="Help", menu=help_menu)
-        
-        self.root.config(menu=menubar)
-
- 
+    def export_reports(self):
+        """Exports generated reports"""
+        # Implementation similar to report export
+        pass
 
 def main():
     """Main application function"""

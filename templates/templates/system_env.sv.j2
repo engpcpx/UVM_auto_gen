@@ -1,0 +1,41 @@
+// UVM system environment for {top_name}
+// Automatically generated on {timestamp}
+
+`include "{uvm_macro_path}"
+
+class {top_name}_system_env extends uvm_env;
+    // Agents for each submodule
+    {% for mod in hierarchy.submodules.values() %}
+    {mod.name}_agent {mod.name}_agent;
+    {% endfor %}
+    
+    // System scoreboard
+    {top_name}_system_scoreboard scoreboard;
+    
+    `uvm_component_param_utils({top_name}_system_env)
+    
+    function new(string name, uvm_component parent);
+        super.new(name, parent);
+    endfunction
+    
+    function void build_phase(uvm_phase phase);
+        super.build_phase(phase);
+        
+        // Create agents
+        {% for mod in hierarchy.submodules.values() %}
+        `uvm_create_component({mod.name}_agent, "{mod.name}_agent")
+        {% endfor %}
+        
+        // Create scoreboard
+        `uvm_create_component({top_name}_system_scoreboard, "scoreboard")
+    endfunction
+    
+    function void connect_phase(uvm_phase phase);
+        super.connect_phase(phase);
+        
+        // Connect agents to scoreboard
+        {% for mod in hierarchy.submodules.values() %}
+        `uvm_connect_analysis_port({mod.name}_agent.monitor.analysis_port, scoreboard.{mod.name}_export)
+        {% endfor %}
+    endfunction
+endclass

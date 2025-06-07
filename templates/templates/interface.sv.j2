@@ -1,0 +1,37 @@
+// Interface for {module.name}
+// Automatically generated on {timestamp}
+
+`include "{uvm_macro_path}"
+
+interface {module.name}_if(input logic clk, input logic reset_n);
+    // Interface signals
+    {% for port in module.ports %}
+    logic {% if port.width != "1" %}{port.width} {% endif %}{port.name};
+    {% endfor %}
+    
+    // Clocking blocks
+    clocking driver_cb @(posedge clk);
+        default input #1step output #0;
+        {% for port in module.get_input_ports() %}
+        input {port.name};
+        {% endfor %}
+        {% for port in module.get_output_ports() %}
+        output {port.name};
+        {% endfor %}
+    endclocking
+    
+    clocking monitor_cb @(posedge clk);
+        default input #1step output #0;
+        {% for port in module.ports %}
+        input {port.name};
+        {% endfor %}
+    endclocking
+    
+    // Modports
+    modport driver_mp(clocking driver_cb, input reset_n);
+    modport monitor_mp(clocking monitor_cb, input reset_n);
+    
+    // Assertion properties
+    // Add your interface assertions here
+    
+endinterface

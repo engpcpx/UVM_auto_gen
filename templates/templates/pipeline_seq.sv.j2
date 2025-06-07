@@ -1,0 +1,26 @@
+// Pipeline verification sequence for {top_name}
+// Automatically generated on {timestamp}
+
+`include "{uvm_macro_path}"
+
+class {top_name}_pipeline_seq extends uvm_sequence;
+    // Sequences for each stage
+    fetch_seq fetch;
+    decode_seq decode;
+    execute_seq execute;
+    
+    `uvm_object_param_utils({top_name}_pipeline_seq)
+    
+    function new(string name = "{top_name}_pipeline_seq");
+        super.new(name);
+    endfunction
+    
+    task body();
+        // Execute sequences in parallel to simulate pipeline
+        fork
+            `uvm_start_seq_on(fetch, fetch_agent.sequencer)
+            `uvm_start_seq_on(decode, decode_agent.sequencer)
+            `uvm_start_seq_on(execute, execute_agent.sequencer)
+        join
+    endtask
+endclass

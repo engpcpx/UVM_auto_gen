@@ -1,0 +1,42 @@
+// System testbench for {top_name}
+// Automatically generated on {timestamp}
+
+`include "{uvm_macro_path}"
+
+module {top_name}_system_tb;
+    // Clock and reset
+    logic clk;
+    logic reset_n;
+    
+    // Interfaces for all submodules
+    {% for mod in hierarchy.submodules.values() %}
+    {mod.name}_if {mod.name}_if();
+    {% endfor %}
+    
+    // DUT instance
+    {top_name} dut (
+        .clk(clk),
+        .reset_n(reset_n),
+        {% for conn in hierarchy.connections %}
+        .{conn[1]}({conn[3]}),
+        {% endfor %}
+    );
+
+    // Clock generation
+    initial begin
+        clk = 0;
+        forever #10 clk = ~clk;
+    end
+    
+    // UVM environment
+    initial begin
+        // Configure interfaces
+        `uvm_config_db_set(null, "*", "dut_vif", dut_if);
+        {% for mod in hierarchy.submodules.values() %}
+        `uvm_config_db_set(null, "*", "{mod.name}_vif", {mod.name}_if);
+        {% endfor %}
+        
+        // Start test
+        `uvm_run_test("{top_name}_system_test");
+    end
+endmodule

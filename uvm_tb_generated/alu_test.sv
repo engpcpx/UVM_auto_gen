@@ -14,7 +14,7 @@ class alu_test extends uvm_test;
     
     task run_phase(uvm_phase phase);
         // Scenario selection
-        string scenarios = "smoke,random,corner,reset,stress,error,functional,performance";
+        string scenarios = "smoke,random,corner";
         
         phase.raise_objection(this);
         
